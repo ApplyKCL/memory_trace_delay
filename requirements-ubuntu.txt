@@ -1,0 +1,23 @@
+# Core dependencies for the validated Ubuntu Isaac Lab environment.
+# Platform: Ubuntu 22.04 x86_64
+# Python: 3.11
+#
+# Isaac Lab is installed separately from source at tag v2.3.2.
+
+isaacsim[all,extscache]==5.1.0
+torch==2.7.0
+torchvision==0.22.0
+rsl-rl-lib==3.1.2
+
+numpy>=1.26
+gymnasium>=1.0,<2.0
+pytest>=8.0,<9.0
+tensorboard>=2.18,<3.0
+
+# Compatibility versions used by the validated workstation environment.
+psutil==5.9.8
+typing_extensions==4.12.2
+onnx==1.20.1
+packaging==23.0
+setuptools>=81,<82
+flatdict>=4.1.0

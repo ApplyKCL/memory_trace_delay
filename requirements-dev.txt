@@ -1,0 +1,14 @@
+# Portable development environment.
+# Intended for Windows/Linux code editing and unit tests.
+# Does not install Isaac Sim or Isaac Lab.
+#
+# Recommended Python: 3.11
+
+numpy>=1.26
+torch==2.7.0
+torchvision==0.22.0
+gymnasium>=1.0,<2.0
+pytest>=8.0,<9.0
+tensorboard>=2.18,<3.0
+typing_extensions==4.12.2
+onnx==1.20.1
