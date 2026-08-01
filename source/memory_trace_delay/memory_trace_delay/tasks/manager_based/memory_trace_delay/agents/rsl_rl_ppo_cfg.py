@@ -1,38 +1,23 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers.
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-from isaaclab.utils import configclass
+"""RSL-RL PPO configuration for the external Go2 baseline."""
 
-from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg
+from isaaclab.utils import configclass
+from isaaclab_tasks.manager_based.locomotion.velocity.config.go2.agents.rsl_rl_ppo_cfg import (
+    UnitreeGo2FlatPPORunnerCfg,
+)
 
 
 @configclass
-class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
-    num_steps_per_env = 16
-    max_iterations = 150
-    save_interval = 50
-    experiment_name = "cartpole_direct"
-    policy = RslRlPpoActorCriticCfg(
-        init_noise_std=1.0,
-        actor_obs_normalization=False,
-        critic_obs_normalization=False,
-        actor_hidden_dims=[32, 32],
-        critic_hidden_dims=[32, 32],
-        activation="elu",
-    )
-    algorithm = RslRlPpoAlgorithmCfg(
-        value_loss_coef=1.0,
-        use_clipped_value_loss=True,
-        clip_param=0.2,
-        entropy_coef=0.005,
-        num_learning_epochs=5,
-        num_mini_batches=4,
-        learning_rate=1.0e-3,
-        schedule="adaptive",
-        gamma=0.99,
-        lam=0.95,
-        desired_kl=0.01,
-        max_grad_norm=1.0,
-    )
+class MemoryTraceDelayGo2PPORunnerCfg(UnitreeGo2FlatPPORunnerCfg):
+    """Official Go2 flat PPO configuration with an isolated log directory."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+
+        # Only change the log directory name.
+        # PPO hyperparameters and network architecture remain unchanged.
+        self.experiment_name = "memory_trace_delay_go2_flat_baseline"
