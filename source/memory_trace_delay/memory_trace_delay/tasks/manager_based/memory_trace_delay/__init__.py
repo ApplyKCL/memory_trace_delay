@@ -10,7 +10,7 @@ from . import agents
 
 gym.register(
     id="MemoryTrace-Velocity-Flat-Unitree-Go2-v0",
-    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    entry_point="memory_trace_delay.action_delay_env:ActionDelayManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point": (
