@@ -32,7 +32,7 @@ class ActionDelayManagerBasedRLEnv(ManagerBasedRLEnv):
             min_delay=cfg.action_delay.min_steps,
             max_delay=cfg.action_delay.max_steps,
             device=self.device,
-            dtype=self.action_manager.action.dtype,
+            dtype=self.action_manager.action.dtype
         )
 
     @property

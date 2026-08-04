@@ -25,8 +25,9 @@ class ActionDelayBuffer:
         max_delay: int = 0,
         *,
         device: str | torch.device = "cpu",
-        dtype: torch.dtype = torch.float32,
+        dtype: torch.dtype = torch.float32
     ) -> None:
+        # Check if the number of environments and action dimensions are positive, and if the delay values are valid.
         if num_envs <= 0:
             raise ValueError(f"num_envs must be positive, received {num_envs}.")
         if action_dim <= 0:
@@ -36,6 +37,12 @@ class ActionDelayBuffer:
         if max_delay < min_delay:
             raise ValueError(f"max_delay must be >= min_delay, received {min_delay=} and {max_delay=}.")
 
+        # num_envs: Number of parallel environments.
+        # action_dim: Dimensionality of the action space.
+        # min_delay: Minimum delay (inclusive) for any environment.
+        # max_delay: Maximum delay (inclusive) for any environment.
+        # device: The device on which to store the buffer (e.g., 'cpu' or 'cuda').
+        # dtype: The data type for the stored actions (e.g., torch.float32).
         self.num_envs = num_envs
         self.action_dim = action_dim
         self.min_delay = min_delay
@@ -48,13 +55,13 @@ class ActionDelayBuffer:
         self._history = torch.zeros(
             (max_delay + 1, num_envs, action_dim),
             device=self.device,
-            dtype=self.dtype,
+            dtype=self.dtype
         )
         self._delay_steps = torch.full(
             (num_envs,),
             min_delay,
             device=self.device,
-            dtype=torch.long,
+            dtype=torch.long
         )
         self._env_ids = torch.arange(num_envs, device=self.device)
         self._write_index = 0
@@ -68,9 +75,14 @@ class ActionDelayBuffer:
         self,
         env_ids: Sequence[int] | torch.Tensor | slice | None = None,
         *,
-        delay_steps: int | Sequence[int] | torch.Tensor | None = None,
+        delay_steps: int | Sequence[int] | torch.Tensor | None = None
     ) -> torch.Tensor:
         """Clear selected histories and assign their next episode delays."""
+
+        # Resolve the environment IDs to a tensor of indices. 
+        # If env_ids is None, it defaults to all environments.
+        # If env_ids is a slice, it converts it to the corresponding indices. 
+        # If env_ids is a tensor or sequence, it checks for validity and converts it to a tensor of long type.
         ids = self._resolve_env_ids(env_ids)
         if ids.numel() == 0:
             return self._delay_steps[ids].clone()
@@ -88,7 +100,7 @@ class ActionDelayBuffer:
                     self.min_delay,
                     self.max_delay + 1,
                     (ids.numel(),),
-                    device=self.device,
+                    device=self.device
                 )
         else:
             delays = torch.as_tensor(delay_steps, device=self.device, dtype=torch.long).flatten()
@@ -98,13 +110,14 @@ class ActionDelayBuffer:
                 raise ValueError(f"Expected one delay or {ids.numel()} delays, received {delays.numel()}.")
             if torch.any(delays < 0) or torch.any(delays > self.max_delay):
                 raise ValueError(f"delay_steps must be in [0, {self.max_delay}].")
-            self._delay_steps[ids] = delays
+            self._delay_steps[ids] = delays               
 
         return self._delay_steps[ids].clone()
 
     def push(self, actions: torch.Tensor) -> torch.Tensor:
         """Store current actions and return each environment's delayed action."""
         expected_shape = (self.num_envs, self.action_dim)
+        # check the shape, device, and dtype of the input actions tensor
         if tuple(actions.shape) != expected_shape:
             raise ValueError(f"Expected action shape {expected_shape}, received {tuple(actions.shape)}.")
         if actions.device != self.device:
@@ -112,24 +125,31 @@ class ActionDelayBuffer:
         if actions.dtype != self.dtype:
             raise ValueError(f"Expected dtype {self.dtype}, received {actions.dtype}.")
 
+        # There is no need to track gradients for the delayed action
+        # Since they are not used for backpropagation
         with torch.no_grad():
+            # Use copy to avoid modifying the input tensor and to ensure that the history buffer maintains its own copy of the actions.
             self._history[self._write_index].copy_(actions)
             read_indices = torch.remainder(self._write_index - self._delay_steps, self.max_delay + 1)
             delayed_actions = self._history[read_indices, self._env_ids]
 
+        # Increment the write index in a circular manner to maintain the ring buffer structure.
         self._write_index = (self._write_index + 1) % (self.max_delay + 1)
+        # The push returns the delayed actions, but store the current actions
         return delayed_actions
 
     def _resolve_env_ids(
         self,
         env_ids: Sequence[int] | torch.Tensor | slice | None,
     ) -> torch.Tensor:
+        # check if env_ids is None, a slice, or a tensor/sequence of indices
         if env_ids is None:
             return self._env_ids
         if isinstance(env_ids, slice):
             return self._env_ids[env_ids]
 
         ids = torch.as_tensor(env_ids, device=self.device)
+        # chceck if the tensor is of boolean type, and if so, convert it to indices
         if ids.dtype == torch.bool:
             if ids.numel() != self.num_envs:
                 raise ValueError(f"Boolean env_ids must contain {self.num_envs} entries.")
