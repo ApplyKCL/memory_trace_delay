@@ -64,6 +64,9 @@ class ActionDelayBuffer:
             dtype=torch.long
         )
         self._env_ids = torch.arange(num_envs, device=self.device)
+        if self.device.type == "cuda" and self.device.index is None:
+            self.device = torch.device("cuda", torch.cuda.current_device())
+
         self._write_index = 0
 
     @property
