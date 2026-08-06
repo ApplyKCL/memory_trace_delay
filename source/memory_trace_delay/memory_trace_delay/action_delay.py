@@ -6,7 +6,9 @@
 """Pure PyTorch FIFO buffering for per-environment action delays."""
 
 from __future__ import annotations
+
 from collections.abc import Sequence
+
 import torch
 
 
@@ -25,7 +27,7 @@ class ActionDelayBuffer:
         max_delay: int = 0,
         *,
         device: str | torch.device = "cpu",
-        dtype: torch.dtype = torch.float32
+        dtype: torch.dtype = torch.float32,
     ) -> None:
         # Check if the number of environments and action dimensions are positive, and if the delay values are valid.
         if num_envs <= 0:
@@ -52,17 +54,8 @@ class ActionDelayBuffer:
 
         # One extra ring slot stores the current action, so d=0 reads the value
         # written by the same push call without a separate code path.
-        self._history = torch.zeros(
-            (max_delay + 1, num_envs, action_dim),
-            device=self.device,
-            dtype=self.dtype
-        )
-        self._delay_steps = torch.full(
-            (num_envs,),
-            min_delay,
-            device=self.device,
-            dtype=torch.long
-        )
+        self._history = torch.zeros((max_delay + 1, num_envs, action_dim), device=self.device, dtype=self.dtype)
+        self._delay_steps = torch.full((num_envs,), min_delay, device=self.device, dtype=torch.long)
         self._env_ids = torch.arange(num_envs, device=self.device)
         if self.device.type == "cuda" and self.device.index is None:
             self.device = torch.device("cuda", torch.cuda.current_device())
@@ -78,13 +71,13 @@ class ActionDelayBuffer:
         self,
         env_ids: Sequence[int] | torch.Tensor | slice | None = None,
         *,
-        delay_steps: int | Sequence[int] | torch.Tensor | None = None
+        delay_steps: int | Sequence[int] | torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Clear selected histories and assign their next episode delays."""
 
-        # Resolve the environment IDs to a tensor of indices. 
+        # Resolve the environment IDs to a tensor of indices.
         # If env_ids is None, it defaults to all environments.
-        # If env_ids is a slice, it converts it to the corresponding indices. 
+        # If env_ids is a slice, it converts it to the corresponding indices.
         # If env_ids is a tensor or sequence, it checks for validity and converts it to a tensor of long type.
         ids = self._resolve_env_ids(env_ids)
         if ids.numel() == 0:
@@ -100,10 +93,7 @@ class ActionDelayBuffer:
                 self._delay_steps[ids] = self.min_delay
             else:
                 self._delay_steps[ids] = torch.randint(
-                    self.min_delay,
-                    self.max_delay + 1,
-                    (ids.numel(),),
-                    device=self.device
+                    self.min_delay, self.max_delay + 1, (ids.numel(),), device=self.device
                 )
         else:
             delays = torch.as_tensor(delay_steps, device=self.device, dtype=torch.long).flatten()
@@ -113,7 +103,7 @@ class ActionDelayBuffer:
                 raise ValueError(f"Expected one delay or {ids.numel()} delays, received {delays.numel()}.")
             if torch.any(delays < 0) or torch.any(delays > self.max_delay):
                 raise ValueError(f"delay_steps must be in [0, {self.max_delay}].")
-            self._delay_steps[ids] = delays               
+            self._delay_steps[ids] = delays
 
         return self._delay_steps[ids].clone()
 
@@ -131,7 +121,7 @@ class ActionDelayBuffer:
         # There is no need to track gradients for the delayed action
         # Since they are not used for backpropagation
         with torch.no_grad():
-            # Use copy to avoid modifying the input tensor and to ensure that the history buffer maintains its own copy of the actions.
+            # Copy actions into the buffer without retaining autograd history.
             self._history[self._write_index].copy_(actions)
             read_indices = torch.remainder(self._write_index - self._delay_steps, self.max_delay + 1)
             delayed_actions = self._history[read_indices, self._env_ids]

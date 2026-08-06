@@ -8,13 +8,7 @@ from pathlib import Path
 import pytest
 import torch
 
-module_path = (
-    Path(__file__).parents[1]
-    / "source"
-    / "memory_trace_delay"
-    / "memory_trace_delay"
-    / "action_delay.py"
-)
+module_path = Path(__file__).parents[1] / "source" / "memory_trace_delay" / "memory_trace_delay" / "action_delay.py"
 spec = importlib.util.spec_from_file_location("action_delay", module_path)
 assert spec is not None and spec.loader is not None
 module = importlib.util.module_from_spec(spec)

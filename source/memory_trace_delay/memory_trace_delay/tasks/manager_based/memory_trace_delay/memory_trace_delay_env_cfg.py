@@ -6,6 +6,7 @@
 """External Go2 flat-terrain environment with episode-fixed action delay."""
 
 from isaaclab.utils import configclass
+
 from isaaclab_tasks.manager_based.locomotion.velocity.config.go2.flat_env_cfg import (
     UnitreeGo2FlatEnvCfg,
 )

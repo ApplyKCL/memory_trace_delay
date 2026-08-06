@@ -6,6 +6,7 @@
 """RSL-RL PPO configuration for the external Go2 baseline."""
 
 from isaaclab.utils import configclass
+
 from isaaclab_tasks.manager_based.locomotion.velocity.config.go2.agents.rsl_rl_ppo_cfg import (
     UnitreeGo2FlatPPORunnerCfg,
 )
