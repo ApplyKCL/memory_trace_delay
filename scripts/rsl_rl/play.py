@@ -117,20 +117,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
-    core = env.unwrapped
-
-    # Print the action delay steps and initial command for debugging purposes
-    print(
-        "[CHECK] action delay:",
-        core.action_delay_steps[: min(4, core.num_envs)].tolist(),
-    )
-
-    print(
-        "[CHECK] initial command:",
-        core.command_manager.get_command("base_velocity")[
-            : min(4, core.num_envs)
-        ].tolist(),
-    )
 
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv):
@@ -191,8 +177,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # reset environment
     obs = env.get_observations()
     timestep = 0
-    # Add a debug step counter
-    debug_step = 0
     # simulate environment
     while simulation_app.is_running():
         start_time = time.time()
@@ -202,20 +186,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             actions = policy(obs)
             # env stepping
             obs, _, dones, _ = env.step(actions)
-            if debug_step % 50 == 0:
-                command = env.unwrapped.command_manager.get_command("base_velocity")[0]
-                actual_velocity = env.unwrapped.scene["robot"].data.root_lin_vel_b[0]
-
-                print(
-                    "[CHECK] "
-                    f"command_x={command[0].item():+.3f}, "
-                    f"actual_x={actual_velocity[0].item():+.3f}, "
-                    f"actual_y={actual_velocity[1].item():+.3f}, "
-                    f"action_mean_abs={actions[0].abs().mean().item():.3f}, "
-                    f"action_max_abs={actions[0].abs().max().item():.3f}"
-                )
-
-            debug_step += 1
             # reset recurrent states for episodes that have terminated
             policy_nn.reset(dones)
         if args_cli.video:

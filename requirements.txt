@@ -131,7 +131,6 @@ MarkupSafe==2.1.3
 matplotlib==3.10.3
 matplotlib-inline==0.2.2
 mdurl==0.1.2
--e git+https://github.com/ApplyKCL/memory_trace_delay.git@a74476470dc8ab31cc64473b8d40e8bb82d0d83b#egg=memory_trace_delay&subdirectory=source/memory_trace_delay
 ml_dtypes==0.5.4
 moviepy==2.2.1
 mpmath==1.3.0
