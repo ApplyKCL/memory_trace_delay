@@ -22,3 +22,13 @@ class MemoryTraceDelayGo2PPORunnerCfg(UnitreeGo2FlatPPORunnerCfg):
         # Only change the log directory name.
         # PPO hyperparameters and network architecture remain unchanged.
         self.experiment_name = "memory_trace_delay_go2_flat_baseline"
+
+
+@configclass
+class MemoryTraceDelayGo2StackPPORunnerCfg(MemoryTraceDelayGo2PPORunnerCfg):
+    """PPO configuration for the stacked-observation baseline."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+
+        self.experiment_name = "memory_trace_delay_go2_flat_stack"

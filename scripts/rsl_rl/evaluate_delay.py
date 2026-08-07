@@ -20,9 +20,7 @@ from isaaclab.app import AppLauncher
 import cli_args  # isort: skip
 
 
-parser = argparse.ArgumentParser(
-    description="Evaluate an RSL-RL checkpoint under a fixed action delay."
-)
+parser = argparse.ArgumentParser(description="Evaluate an RSL-RL checkpoint under a fixed action delay.")
 parser.add_argument(
     "--task",
     type=str,
@@ -96,6 +94,7 @@ simulation_app = app_launcher.app
 """Imports below this line require Isaac Sim to be running."""
 
 import gymnasium as gym
+import memory_trace_delay.tasks  # noqa: F401
 import torch
 from rsl_rl.runners import DistillationRunner, OnPolicyRunner
 
@@ -112,8 +111,6 @@ from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper
 
 import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils.hydra import hydra_task_config
-
-import memory_trace_delay.tasks  # noqa: F401
 
 
 def mean_and_std(values: list[float]) -> tuple[float, float]:
@@ -186,9 +183,7 @@ def main(
                 device=agent_cfg.device,
             )
         else:
-            raise ValueError(
-                f"Unsupported runner class: {agent_cfg.class_name}"
-            )
+            raise ValueError(f"Unsupported runner class: {agent_cfg.class_name}")
 
         runner.load(resume_path)
 
@@ -229,12 +224,8 @@ def main(
         obs = env.get_observations()
 
         vector_steps = 0
-        episodes_per_batch = math.ceil(
-            args_cli.num_episodes / args_cli.num_envs
-        )
-        max_vector_steps = (
-            2 * episodes_per_batch * env.max_episode_length
-        )
+        episodes_per_batch = math.ceil(args_cli.num_episodes / args_cli.num_envs)
+        max_vector_steps = 2 * episodes_per_batch * env.max_episode_length
 
         while (
             simulation_app.is_running()
@@ -252,9 +243,7 @@ def main(
                     command[:, :2] - robot_data.root_lin_vel_b[:, :2],
                     dim=1,
                 )
-                yaw_error = torch.abs(
-                    command[:, 2] - robot_data.root_ang_vel_b[:, 2]
-                )
+                yaw_error = torch.abs(command[:, 2] - robot_data.root_ang_vel_b[:, 2])
 
                 actions = policy(obs)
                 obs, rewards, dones, extras = env.step(actions)
@@ -274,10 +263,7 @@ def main(
                             dtype=torch.bool,
                         )
                     elif hasattr(core, "termination_manager"):
-                        timeouts = core.termination_manager.time_outs.to(
-                            device=device,
-                            dtype=torch.bool
-                        )
+                        timeouts = core.termination_manager.time_outs.to(device=device, dtype=torch.bool)
                     else:
                         timeouts = torch.zeros(
                             num_envs,
@@ -286,19 +272,21 @@ def main(
                         )
 
                     done_lengths = episode_lengths[done_ids]
-                    safe_lengths = done_lengths.clamp_min(1).to(
-                        dtype=episode_returns.dtype
+                    safe_lengths = done_lengths.clamp_min(1).to(dtype=episode_returns.dtype)
+                    batch_metrics = (
+                        torch.stack(
+                            (
+                                episode_returns[done_ids],
+                                done_lengths.to(dtype=episode_returns.dtype),
+                                episode_pre_action_xy_errors[done_ids] / safe_lengths,
+                                episode_pre_action_yaw_errors[done_ids] / safe_lengths,
+                                timeouts[done_ids].to(dtype=episode_returns.dtype),
+                            ),
+                            dim=1,
+                        )
+                        .detach()
+                        .cpu()
                     )
-                    batch_metrics = torch.stack(
-                        (
-                            episode_returns[done_ids],
-                            done_lengths.to(dtype=episode_returns.dtype),
-                            episode_pre_action_xy_errors[done_ids] / safe_lengths,
-                            episode_pre_action_yaw_errors[done_ids] / safe_lengths,
-                            timeouts[done_ids].to(dtype=episode_returns.dtype),
-                        ),
-                        dim=1,
-                    ).detach().cpu()
 
                     completed_returns.extend(batch_metrics[:, 0].tolist())
                     completed_lengths.extend(batch_metrics[:, 1].tolist())
@@ -320,8 +308,7 @@ def main(
                         args_cli.num_episodes,
                     )
                     print(
-                        f"\r[INFO] Completed episodes: "
-                        f"{completed_count}/{args_cli.num_episodes}",
+                        f"\r[INFO] Completed episodes: {completed_count}/{args_cli.num_episodes}",
                         end="",
                         flush=True,
                     )
@@ -340,23 +327,15 @@ def main(
         # A final vector step may finish more episodes than requested.
         completed_returns = completed_returns[: args_cli.num_episodes]
         completed_lengths = completed_lengths[: args_cli.num_episodes]
-        completed_pre_action_xy_errors = completed_pre_action_xy_errors[
-            : args_cli.num_episodes
-        ]
-        completed_pre_action_yaw_errors = completed_pre_action_yaw_errors[
-            : args_cli.num_episodes
-        ]
+        completed_pre_action_xy_errors = completed_pre_action_xy_errors[: args_cli.num_episodes]
+        completed_pre_action_yaw_errors = completed_pre_action_yaw_errors[: args_cli.num_episodes]
         completed_failures = completed_failures[: args_cli.num_episodes]
         completed_timeouts = completed_timeouts[: args_cli.num_episodes]
 
         mean_return, std_return = mean_and_std(completed_returns)
         mean_length, std_length = mean_and_std(completed_lengths)
-        mean_pre_action_xy_error, std_pre_action_xy_error = mean_and_std(
-            completed_pre_action_xy_errors
-        )
-        mean_pre_action_yaw_error, std_pre_action_yaw_error = mean_and_std(
-            completed_pre_action_yaw_errors
-        )
+        mean_pre_action_xy_error, std_pre_action_xy_error = mean_and_std(completed_pre_action_xy_errors)
+        mean_pre_action_yaw_error, std_pre_action_yaw_error = mean_and_std(completed_pre_action_yaw_errors)
         failure_rate, _ = mean_and_std(completed_failures)
         timeout_rate, _ = mean_and_std(completed_timeouts)
 
@@ -368,9 +347,7 @@ def main(
             "num_episodes": args_cli.num_episodes,
             "test_delay_steps": args_cli.test_delay,
             "step_dt_seconds": float(core.step_dt),
-            "test_delay_seconds": float(
-                args_cli.test_delay * core.step_dt
-            ),
+            "test_delay_seconds": float(args_cli.test_delay * core.step_dt),
             "tracking_error_sample_phase": "pre_action",
             "mean_return": mean_return,
             "std_return": std_return,

@@ -28,3 +28,14 @@ class MemoryTraceDelayGo2EnvCfg(UnitreeGo2FlatEnvCfg):
 
     def __post_init__(self) -> None:
         super().__post_init__()
+
+
+@configclass
+class MemoryTraceDelayGo2StackEnvCfg(MemoryTraceDelayGo2EnvCfg):
+    """Go2 delay environment with stacked policy-observation history."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+
+        self.observations.policy.history_length = 5
+        self.observations.policy.flatten_history_dim = True

@@ -1,0 +1,22 @@
+{
+  "task": "MemoryTrace-Velocity-Flat-Unitree-Go2-v0",
+  "checkpoint": "/home/c160/shaonanhu/graduatestudy/csci6521project/memory_trace_delay/logs/rsl_rl/memory_trace_delay_go2_flat_baseline/2026-08-06_22-31-11_delay0to4_random_seed42_full/model_299.pt",
+  "seed": 123,
+  "num_envs": 256,
+  "num_episodes": 1024,
+  "test_delay_steps": 0,
+  "step_dt_seconds": 0.02,
+  "test_delay_seconds": 0.0,
+  "tracking_error_sample_phase": "pre_action",
+  "mean_return": 12.003574686850698,
+  "std_return": 7.668700040517384,
+  "mean_episode_length": 957.39453125,
+  "std_episode_length": 174.11982507950603,
+  "mean_pre_action_xy_velocity_error": 0.7025927846189006,
+  "std_pre_action_xy_velocity_error": 0.2154662344804021,
+  "mean_pre_action_yaw_velocity_error": 0.45211481696969713,
+  "std_pre_action_yaw_velocity_error": 0.21418855751639515,
+  "failure_rate": 0.0625,
+  "timeout_rate": 0.9375,
+  "vector_steps": 4000
+}
