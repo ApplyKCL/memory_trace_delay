@@ -28,6 +28,18 @@ parser.add_argument(
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
 parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
 parser.add_argument(
+    "--train_delay_min",
+    type=int,
+    default=None,
+    help="Minimum episode-fixed action delay used during training.",
+)
+parser.add_argument(
+    "--train_delay_max",
+    type=int,
+    default=None,
+    help="Maximum episode-fixed action delay used during training.",
+)
+parser.add_argument(
     "--distributed", action="store_true", default=False, help="Run training with multiple GPUs or nodes."
 )
 parser.add_argument("--export_io_descriptors", action="store_true", default=False, help="Export IO descriptors.")
@@ -94,7 +106,7 @@ from isaaclab.envs import (
 from isaaclab.utils.dict import print_dict
 from isaaclab.utils.io import dump_yaml
 
-from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper
+from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg
 
 import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils import get_checkpoint_path
@@ -104,6 +116,7 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 logger = logging.getLogger(__name__)
 
 import memory_trace_delay.tasks  # noqa: F401
+from memory_trace_delay.rsl_rl_trace_wrapper import wrap_rsl_rl_env
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -125,6 +138,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # note: certain randomizations occur in the environment initialization so we set the seed here
     env_cfg.seed = agent_cfg.seed
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
+
+    if args_cli.train_delay_min is not None:
+        env_cfg.action_delay.min_steps = args_cli.train_delay_min
+    if args_cli.train_delay_max is not None:
+        env_cfg.action_delay.max_steps = args_cli.train_delay_max
+    if env_cfg.action_delay.min_steps < 0:
+        raise ValueError("train_delay_min must be non-negative.")
+    if env_cfg.action_delay.max_steps < env_cfg.action_delay.min_steps:
+        raise ValueError("train_delay_max must be >= train_delay_min.")
     # check for invalid combination of CPU device with distributed training
     if args_cli.distributed and args_cli.device is not None and "cpu" in args_cli.device:
         raise ValueError(
@@ -192,7 +214,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     start_time = time.time()
 
     # wrap around environment for rsl-rl
-    env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
+    env = wrap_rsl_rl_env(env, env_cfg, clip_actions=agent_cfg.clip_actions)
 
     # create runner from rsl-rl
     if agent_cfg.class_name == "OnPolicyRunner":

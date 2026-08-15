@@ -23,7 +23,10 @@ keywords = ["extension", "template", "isaaclab"]
 # NOTE: Add additional dependencies here
 
 [[python.module]]
-name = "memory_trace_delay"
+name = "memory_trace_delay.tasks"
+
+[[python.module]]
+name = "memory_trace_delay.ui_extension_example"
 
 [isaac_lab_settings]
 # TODO: Uncomment and list any apt dependencies here.

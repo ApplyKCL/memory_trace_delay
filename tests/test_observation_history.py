@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 import torch
 
-
 module_path = (
     Path(__file__).parents[1]
     / "source"

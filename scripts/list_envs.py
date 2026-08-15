@@ -33,9 +33,8 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 import gymnasium as gym
-from prettytable import PrettyTable
-
 import memory_trace_delay.tasks  # noqa: F401
+from prettytable import PrettyTable
 
 
 def main():

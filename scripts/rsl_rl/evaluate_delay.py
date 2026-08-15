@@ -58,6 +58,30 @@ parser.add_argument(
     help="Evaluation seed.",
 )
 parser.add_argument(
+    "--method",
+    type=str,
+    default="unspecified",
+    help="Method label stored in the result metadata.",
+)
+parser.add_argument(
+    "--training_seed",
+    type=int,
+    default=None,
+    help="Seed used to train the evaluated checkpoint.",
+)
+parser.add_argument(
+    "--train_delay_min",
+    type=int,
+    default=None,
+    help="Minimum action delay used to train the checkpoint.",
+)
+parser.add_argument(
+    "--train_delay_max",
+    type=int,
+    default=None,
+    help="Maximum action delay used to train the checkpoint.",
+)
+parser.add_argument(
     "--output",
     type=str,
     required=True,
@@ -96,6 +120,7 @@ simulation_app = app_launcher.app
 import gymnasium as gym
 import memory_trace_delay.tasks  # noqa: F401
 import torch
+from memory_trace_delay.rsl_rl_trace_wrapper import wrap_rsl_rl_env
 from rsl_rl.runners import DistillationRunner, OnPolicyRunner
 
 from isaaclab.envs import (
@@ -107,7 +132,7 @@ from isaaclab.envs import (
 )
 from isaaclab.utils.assets import retrieve_file_path
 
-from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper
+from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg
 
 import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils.hydra import hydra_task_config
@@ -163,8 +188,9 @@ def main(
         if isinstance(env.unwrapped, DirectMARLEnv):
             env = multi_agent_to_single_agent(env)
 
-        env = RslRlVecEnvWrapper(
+        env = wrap_rsl_rl_env(
             env,
+            env_cfg,
             clip_actions=agent_cfg.clip_actions,
         )
 
@@ -342,7 +368,20 @@ def main(
         result = {
             "task": args_cli.task,
             "checkpoint": str(Path(resume_path).resolve()),
+            "method": args_cli.method,
             "seed": agent_cfg.seed,
+            "training_seed": args_cli.training_seed,
+            "evaluation_seed": agent_cfg.seed,
+            "train_delay_min": args_cli.train_delay_min,
+            "train_delay_max": args_cli.train_delay_max,
+            "trace_enabled": bool(
+                getattr(getattr(env_cfg, "memory_trace", None), "enabled", False)
+            ),
+            "trace_decay": getattr(
+                getattr(env_cfg, "memory_trace", None),
+                "decay",
+                None,
+            ),
             "num_envs": args_cli.num_envs,
             "num_episodes": args_cli.num_episodes,
             "test_delay_steps": args_cli.test_delay,

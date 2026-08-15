@@ -39,3 +39,19 @@ gym.register(
         ),
     },
 )
+
+gym.register(
+    id="MemoryTrace-Trace-Velocity-Flat-Unitree-Go2-v0",
+    entry_point="memory_trace_delay.action_delay_env:ActionDelayManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.memory_trace_delay_env_cfg:"
+            "MemoryTraceDelayGo2TraceEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.rsl_rl_ppo_cfg:"
+            "MemoryTraceDelayGo2TracePPORunnerCfg"
+        ),
+    },
+)

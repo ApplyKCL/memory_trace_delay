@@ -32,3 +32,13 @@ class MemoryTraceDelayGo2StackPPORunnerCfg(MemoryTraceDelayGo2PPORunnerCfg):
         super().__post_init__()
 
         self.experiment_name = "memory_trace_delay_go2_flat_stack"
+
+
+@configclass
+class MemoryTraceDelayGo2TracePPORunnerCfg(MemoryTraceDelayGo2PPORunnerCfg):
+    """PPO configuration for the single exponential-trace policy."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+
+        self.experiment_name = "memory_trace_delay_go2_flat_trace"

@@ -15,11 +15,10 @@ app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
 import gymnasium as gym
+import memory_trace_delay.tasks  # noqa: F401
 import torch
 
 from isaaclab_tasks.utils import parse_env_cfg
-
-import memory_trace_delay.tasks  # noqa: F401
 
 
 def main() -> None:

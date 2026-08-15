@@ -3,12 +3,19 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""
-Python module serving as a project/extension template.
+"""Memory Trace Delay project package.
+
+Task registration is intentionally explicit through ``import
+memory_trace_delay.tasks`` so the pure PyTorch buffers remain importable on
+machines without Isaac Lab.
 """
 
-# Register Gym environments.
-from .tasks import *
+from .action_delay import ActionDelayBuffer
+from .memory_trace import MemoryTraceBuffer
+from .observation_history import ObservationHistoryBuffer
 
-# Register UI extensions.
-from .ui_extension_example import *
+__all__ = [
+    "ActionDelayBuffer",
+    "MemoryTraceBuffer",
+    "ObservationHistoryBuffer",
+]
