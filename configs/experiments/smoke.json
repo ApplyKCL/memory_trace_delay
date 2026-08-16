@@ -1,0 +1,157 @@
+{
+  "version": 1,
+  "notes": [
+    "Run with: python scripts/run_experiments.py --config configs/experiments/train.json",
+    "Set method.enabled=false to omit a method.",
+    "Set training.enabled=false to reuse checkpoint_glob without retraining.",
+    "Set evaluation.enabled=false to train without evaluating.",
+    "Add normal CLI or Hydra overrides to a stage's extra_args list.",
+    "Increase common.training.seeds to [42, 43, 44] for a multi-training-seed study."
+  ],
+  "continue_on_error": false,
+  "common": {
+    "training": {
+      "enabled": true,
+      "seeds": [
+        42
+      ],
+      "num_envs": 64,
+      "max_iterations": 2,
+      "device": "cuda:0",
+      "headless": true,
+      "extra_args": []
+    },
+    "evaluation": {
+      "enabled": true,
+      "seeds": [
+        123
+      ],
+      "test_delays": [
+        0,
+        4
+      ],
+      "num_envs": 64,
+      "num_episodes": 64,
+      "device": "cuda:0",
+      "headless": true,
+      "overwrite": true,
+      "extra_args": []
+    }
+  },
+  "methods": [
+    {
+      "key": "train0",
+      "name": "MLP trained at fixed delay 0",
+      "enabled": true,
+      "task": "MemoryTrace-Velocity-Flat-Unitree-Go2-v0",
+      "experiment_name": "memory_trace_delay_go2_flat_baseline",
+      "training": {
+        "enabled": true,
+        "delay_min": 0,
+        "delay_max": 0,
+        "run_name": "delay0_seed{training_seed}_full",
+        "checkpoint_glob": "logs/rsl_rl/memory_trace_delay_go2_flat_baseline/*_delay0_seed{training_seed}_full/model_*.pt",
+        "extra_args": []
+      },
+      "evaluation": {
+        "enabled": true,
+        "output_dir": "results/mlp",
+        "result_filename": "train0_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
+        "extra_args": []
+      }
+    },
+    {
+      "key": "train2",
+      "name": "MLP trained at fixed delay 2",
+      "enabled": true,
+      "task": "MemoryTrace-Velocity-Flat-Unitree-Go2-v0",
+      "experiment_name": "memory_trace_delay_go2_flat_baseline",
+      "training": {
+        "enabled": true,
+        "delay_min": 2,
+        "delay_max": 2,
+        "run_name": "delay2_seed{training_seed}_full",
+        "checkpoint_glob": "logs/rsl_rl/memory_trace_delay_go2_flat_baseline/*_delay2_seed{training_seed}_full/model_*.pt",
+        "extra_args": []
+      },
+      "evaluation": {
+        "enabled": true,
+        "output_dir": "results/mlp",
+        "result_filename": "train2_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
+        "extra_args": []
+      }
+    },
+    {
+      "key": "train0to4",
+      "name": "MLP trained with random delay 0-4",
+      "enabled": true,
+      "task": "MemoryTrace-Velocity-Flat-Unitree-Go2-v0",
+      "experiment_name": "memory_trace_delay_go2_flat_baseline",
+      "training": {
+        "enabled": true,
+        "delay_min": 0,
+        "delay_max": 4,
+        "run_name": "delay0to4_random_seed{training_seed}_full",
+        "checkpoint_glob": "logs/rsl_rl/memory_trace_delay_go2_flat_baseline/*_delay0to4_random_seed{training_seed}_full/model_*.pt",
+        "extra_args": []
+      },
+      "evaluation": {
+        "enabled": true,
+        "output_dir": "results/mlp",
+        "result_filename": "train0to4_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
+        "extra_args": []
+      }
+    },
+    {
+      "key": "stack5",
+      "name": "Stack-PPO with five observations",
+      "enabled": true,
+      "task": "MemoryTrace-Stack-Velocity-Flat-Unitree-Go2-v0",
+      "experiment_name": "memory_trace_delay_go2_flat_stack",
+      "training": {
+        "enabled": true,
+        "delay_min": 0,
+        "delay_max": 4,
+        "run_name": "stack5_delay0to4_seed{training_seed}_full",
+        "checkpoint_glob": "logs/rsl_rl/memory_trace_delay_go2_flat_stack/*_stack5_delay0to4_seed{training_seed}_full/model_*.pt",
+        "extra_args": []
+      },
+      "evaluation": {
+        "enabled": true,
+        "output_dir": "results/stack",
+        "result_filename": "stack5_train0to4_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
+        "extra_args": []
+      }
+    },
+    {
+      "key": "trace08",
+      "name": "Trace-PPO with decay 0.8",
+      "enabled": true,
+      "task": "MemoryTrace-Trace-Velocity-Flat-Unitree-Go2-v0",
+      "experiment_name": "memory_trace_delay_go2_flat_trace",
+      "training": {
+        "enabled": true,
+        "delay_min": 0,
+        "delay_max": 4,
+        "run_name": "trace08_delay0to4_seed{training_seed}_smoke",
+        "checkpoint_glob": "logs/rsl_rl/memory_trace_delay_go2_flat_trace/*_trace08_delay0to4_seed{training_seed}_full/model_*.pt",
+        "extra_args": []
+      },
+      "evaluation": {
+        "enabled": true,
+        "output_dir": "results/smoke/trace",
+        "result_filename": "trace08_train0to4_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
+        "extra_args": []
+      }
+    }
+  ],
+  "analysis": {
+    "enabled": true,
+    "mlp_dir": "results/smoke/mlp",
+    "stack_dir": "results/smoke/stack",
+    "trace_dir": "results/smoke/trace",
+    "output_csv": "results/smoke/combined_summary.csv",
+    "figure_dir": "results/smoke/figures",
+    "extra_args": []
+  }
+}
