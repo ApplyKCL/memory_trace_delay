@@ -34,20 +34,37 @@ def test_project_experiment_config_is_valid() -> None:
         "stack5_train0",
         "stack5_train2",
         "stack5",
+        "stack2",
+        "stack8",
         "trace08_train0",
         "trace08_train2",
         "trace08",
+        "trace05",
+        "trace0875",
     ]
 
-    assert module.load_execution_settings(config) == module.ExecutionSettings((0, 1, 2, 3), 4, 4)
+    assert module.load_execution_settings(config) == module.ExecutionSettings((0, 1, 2), 3, (0, 1, 2, 3), 3, 4)
 
     assert config["common"]["training"]["seeds"] == [42, 43, 44]
     assert config["common"]["training"]["max_iterations"] == 500
+    assert config["common"]["training"]["validation"] == {
+        "enabled": True,
+        "seeds": [901, 902],
+        "test_delays": [0, 2, 4, 6],
+        "interval": 100,
+        "start_iteration": 100,
+        "num_envs": 256,
+        "num_episodes": 256,
+        "lock_file": "logs/rsl_rl/.locks/training_validation_gpu3.lock",
+    }
     assert config["common"]["evaluation"]["training_seeds"] == [42, 43, 44]
-    assert config["common"]["evaluation"]["test_delays"] == [0, 2, 4, 6]
+    assert config["common"]["evaluation"]["seeds"] == [123, 124, 125]
+    assert config["common"]["evaluation"]["test_delays"] == list(range(7))
 
     methods = {method["key"]: method for method in config["methods"]}
     expected_fixed_delays = {
+        "train0": (0, 0),
+        "train2": (2, 2),
         "stack5_train0": (0, 0),
         "stack5_train2": (2, 2),
         "trace08_train0": (0, 0),
@@ -57,11 +74,34 @@ def test_project_experiment_config_is_valid() -> None:
         training = methods[key]["training"]
         assert (training["delay_min"], training["delay_max"]) == delay_range
         assert training["seeds"] == [42, 43, 44]
+        assert training["enabled"]
+
+    for key in ("train0to4", "stack5", "trace08"):
+        assert methods[key]["training"]["seeds"] == [42, 43, 44, 45, 46]
+        assert methods[key]["evaluation"]["training_seeds"] == [42, 43, 44, 45, 46]
+
+    ablation_overrides = {
+        "stack2": "env.observations.policy.history_length=2",
+        "stack8": "env.observations.policy.history_length=8",
+        "trace05": "env.memory_trace.decay=0.5",
+        "trace0875": "env.memory_trace.decay=0.875",
+    }
+    for key, override in ablation_overrides.items():
+        assert methods[key]["training"]["seeds"] == [42, 43, 44]
+        assert methods[key]["training"]["extra_args"] == [override]
+        assert methods[key]["evaluation"]["extra_args"] == [override]
 
 
 def test_duplicate_gpu_is_rejected() -> None:
     with pytest.raises(ValueError, match="duplicates"):
         module.load_execution_settings({"execution": {"gpus": [0, 0]}})
+
+
+def test_validation_gpu_must_not_overlap_training_pool() -> None:
+    with pytest.raises(ValueError, match="reserved"):
+        module.load_execution_settings(
+            {"execution": {"training_gpus": [0, 1], "validation_gpu": 1, "evaluation_gpus": [0, 1]}}
+        )
 
 
 def test_scheduler_replaces_device_without_mutating_command() -> None:
@@ -152,6 +192,40 @@ def test_train_command_contains_structured_and_special_configuration(tmp_path: P
     assert command[-3:] == ["--logger", "tensorboard", "env.custom=true"]
 
 
+def test_train_command_enables_online_validation(tmp_path: Path) -> None:
+    train_cfg = {
+        "num_envs": 128,
+        "max_iterations": 500,
+        "delay_min": 0,
+        "delay_max": 4,
+        "device": "cuda:0",
+        "headless": True,
+        "run_name": "trace_seed{training_seed}",
+        "validation": {
+            "enabled": True,
+            "seeds": [901, 902],
+            "test_delays": [0, 2, 4, 6],
+            "interval": 100,
+            "start_iteration": 100,
+            "num_envs": 256,
+            "num_episodes": 256,
+            "device": "cuda:3",
+            "lock_file": "logs/validation.lock",
+        },
+        "extra_args": [],
+    }
+
+    command, _ = module.build_train_command(tmp_path, "python", sample_method(), train_cfg, 42)
+
+    assert "--training_validation" in command
+    assert command[command.index("--validation_method") + 1] == "trace08"
+    assert command[command.index("--validation_device") + 1] == "cuda:3"
+    assert [command[index + 1] for index, value in enumerate(command) if value == "--validation_seed"] == [
+        "901",
+        "902",
+    ]
+
+
 def test_output_filename_keeps_training_and_evaluation_seeds(tmp_path: Path) -> None:
     evaluation_cfg = {
         "output_dir": "results/trace",
@@ -184,6 +258,20 @@ def test_latest_checkpoint_uses_run_then_iteration(tmp_path: Path) -> None:
     assert module.select_latest_checkpoint([older, newer_low, newer_high]) == newer_high
 
 
+def test_best_checkpoint_uses_newest_completed_validation_run(tmp_path: Path) -> None:
+    experiment = tmp_path / "logs" / "rsl_rl" / "trace-test"
+    old_run = experiment / "2026-08-01_trace_seed42"
+    new_run = experiment / "2026-08-02_trace_seed42"
+    for run in (old_run, new_run):
+        run.mkdir(parents=True)
+        (run / "best_model.pt").touch()
+        (run / "best_checkpoint.json").write_text("{}", encoding="utf-8")
+
+    checkpoint = module.find_best_checkpoint(tmp_path, "trace-test", "trace_seed42")
+
+    assert checkpoint == (new_run / "best_model.pt").resolve()
+
+
 def test_invalid_delay_range_is_rejected(tmp_path: Path) -> None:
     train_cfg = {
         "num_envs": 1,
@@ -195,3 +283,21 @@ def test_invalid_delay_range_is_rejected(tmp_path: Path) -> None:
     }
     with pytest.raises(ValueError, match="delay_max"):
         module.build_train_command(tmp_path, "python", sample_method(), train_cfg, 42)
+
+
+def test_analysis_command_includes_engineering_inputs(tmp_path: Path) -> None:
+    command = module.build_analysis_command(
+        tmp_path,
+        "python",
+        {
+            "benchmark_dir": "results/benchmarks",
+            "benchmark_backend": "torchscript",
+            "benchmark_device": "cpu",
+            "engineering_csv": "results/engineering_summary.csv",
+        },
+    )
+
+    assert command[command.index("--benchmark_dir") + 1] == "results/benchmarks"
+    assert command[command.index("--benchmark_backend") + 1] == "torchscript"
+    assert command[command.index("--benchmark_device") + 1] == "cpu"
+    assert command[command.index("--engineering_csv") + 1] == "results/engineering_summary.csv"

@@ -48,8 +48,9 @@ parser.add_argument(
 parser.add_argument(
     "--test_delay",
     type=int,
+    action="append",
     required=True,
-    help="Fixed action delay used during evaluation, measured in environment steps.",
+    help="Fixed delay to evaluate; repeat to evaluate paired delay groups in one process.",
 )
 parser.add_argument(
     "--seed",
@@ -96,8 +97,17 @@ args_cli, hydra_args = parser.parse_known_args()
 if args_cli.checkpoint is None:
     parser.error("--checkpoint is required.")
 
-if args_cli.test_delay < 0:
+if any(delay < 0 for delay in args_cli.test_delay):
     parser.error("--test_delay must be non-negative.")
+
+if len(set(args_cli.test_delay)) != len(args_cli.test_delay):
+    parser.error("--test_delay values must not contain duplicates.")
+
+if args_cli.num_envs < len(args_cli.test_delay):
+    parser.error("--num_envs must be at least the number of test delays.")
+
+if len(args_cli.test_delay) > 1 and "{test_delay}" not in args_cli.output:
+    parser.error("Multi-delay evaluation requires {test_delay} in --output.")
 
 if args_cli.num_envs <= 0:
     parser.error("--num_envs must be positive.")
@@ -161,9 +171,10 @@ def main(
         env_cfg.sim.device = args_cli.device
         agent_cfg.device = args_cli.device
 
-    # Use a fixed delay for every environment and every episode.
-    env_cfg.action_delay.min_steps = args_cli.test_delay
-    env_cfg.action_delay.max_steps = args_cli.test_delay
+    # Allocate enough FIFO history for every requested delay. Persistent
+    # per-environment delays are assigned after environment construction.
+    env_cfg.action_delay.min_steps = min(args_cli.test_delay)
+    env_cfg.action_delay.max_steps = max(args_cli.test_delay)
 
     # Match the deterministic parts of the official Go2 play configuration.
     env_cfg.observations.policy.enable_corruption = False
@@ -175,8 +186,13 @@ def main(
             env_cfg.events.push_robot = None
 
     resume_path = retrieve_file_path(args_cli.checkpoint)
+    checkpoint_selection = None
+    selection_manifest = Path(resume_path).resolve().parent / "best_checkpoint.json"
+    if Path(resume_path).name == "best_model.pt" and selection_manifest.is_file():
+        with selection_manifest.open("r", encoding="utf-8") as file:
+            checkpoint_selection = json.load(file)
     print(f"[INFO] Checkpoint: {resume_path}")
-    print(f"[INFO] Test delay: {args_cli.test_delay}")
+    print(f"[INFO] Test delays: {args_cli.test_delay}")
     print(f"[INFO] Environments: {args_cli.num_envs}")
     print(f"[INFO] Requested episodes: {args_cli.num_episodes}")
 
@@ -223,11 +239,22 @@ def main(
         core = env.unwrapped
         device = core.device
         num_envs = core.num_envs
+        test_delays = tuple(args_cli.test_delay)
+        delay_values = torch.tensor(test_delays, device=device, dtype=torch.long)
+        delay_repeats = math.ceil(num_envs / len(test_delays))
+        forced_delays = delay_values.repeat(delay_repeats)[:num_envs]
+        core.set_forced_action_delays(forced_delays)
+        env.seed(agent_cfg.seed)
+        obs, _ = env.reset()
+        policy_nn.reset(torch.ones(num_envs, device=device, dtype=torch.long))
 
-        print(
-            "[CHECK] action delay:",
-            core.action_delay_steps[: min(8, num_envs)].tolist(),
-        )
+        group_sizes = {
+            delay: int((forced_delays == delay).sum().item())
+            for delay in test_delays
+        }
+        if not torch.equal(core.action_delay_steps, forced_delays):
+            raise RuntimeError("Forced paired action delays were not preserved across reset.")
+        print("[CHECK] paired action delays:", group_sizes)
 
         # Per-environment accumulators for the current episode.
         episode_returns = torch.zeros(num_envs, device=device)
@@ -246,16 +273,20 @@ def main(
         completed_pre_action_yaw_errors: list[float] = []
         completed_failures: list[float] = []
         completed_timeouts: list[float] = []
-
-        obs = env.get_observations()
+        completed_test_delays: list[int] = []
+        completed_counts = {delay: 0 for delay in test_delays}
 
         vector_steps = 0
-        episodes_per_batch = math.ceil(args_cli.num_episodes / args_cli.num_envs)
+        episodes_per_batch = max(
+            math.ceil(args_cli.num_episodes / group_sizes[delay])
+            for delay in test_delays
+        )
         max_vector_steps = 2 * episodes_per_batch * env.max_episode_length
+        total_requested_episodes = args_cli.num_episodes * len(test_delays)
 
         while (
             simulation_app.is_running()
-            and len(completed_returns) < args_cli.num_episodes
+            and any(count < args_cli.num_episodes for count in completed_counts.values())
             and vector_steps < max_vector_steps
         ):
             with torch.inference_mode():
@@ -321,6 +352,10 @@ def main(
                     batch_timeouts = batch_metrics[:, 4].tolist()
                     completed_timeouts.extend(batch_timeouts)
                     completed_failures.extend(1.0 - value for value in batch_timeouts)
+                    batch_delays = core.action_delay_steps[done_ids].detach().cpu().tolist()
+                    completed_test_delays.extend(batch_delays)
+                    for delay in batch_delays:
+                        completed_counts[int(delay)] += 1
 
                     episode_returns[done_ids] = 0.0
                     episode_lengths[done_ids] = 0
@@ -329,12 +364,12 @@ def main(
 
                     policy_nn.reset(dones)
 
-                    completed_count = min(
-                        len(completed_returns),
-                        args_cli.num_episodes,
+                    completed_count = sum(
+                        min(count, args_cli.num_episodes)
+                        for count in completed_counts.values()
                     )
                     print(
-                        f"\r[INFO] Completed episodes: {completed_count}/{args_cli.num_episodes}",
+                        f"\r[INFO] Completed paired episodes: {completed_count}/{total_requested_episodes}",
                         end="",
                         flush=True,
                     )
@@ -343,72 +378,84 @@ def main(
 
         print()
 
-        if len(completed_returns) < args_cli.num_episodes:
+        incomplete = {
+            delay: count
+            for delay, count in completed_counts.items()
+            if count < args_cli.num_episodes
+        }
+        if incomplete:
             raise RuntimeError(
-                "Evaluation ended before enough episodes were collected. "
-                f"Collected {len(completed_returns)} of "
-                f"{args_cli.num_episodes} episodes."
+                "Evaluation ended before enough paired episodes were collected. "
+                f"Incomplete delay counts: {incomplete}."
             )
 
-        # A final vector step may finish more episodes than requested.
-        completed_returns = completed_returns[: args_cli.num_episodes]
-        completed_lengths = completed_lengths[: args_cli.num_episodes]
-        completed_pre_action_xy_errors = completed_pre_action_xy_errors[: args_cli.num_episodes]
-        completed_pre_action_yaw_errors = completed_pre_action_yaw_errors[: args_cli.num_episodes]
-        completed_failures = completed_failures[: args_cli.num_episodes]
-        completed_timeouts = completed_timeouts[: args_cli.num_episodes]
+        for test_delay in test_delays:
+            indices = [
+                index
+                for index, completed_delay in enumerate(completed_test_delays)
+                if completed_delay == test_delay
+            ][: args_cli.num_episodes]
 
-        mean_return, std_return = mean_and_std(completed_returns)
-        mean_length, std_length = mean_and_std(completed_lengths)
-        mean_pre_action_xy_error, std_pre_action_xy_error = mean_and_std(completed_pre_action_xy_errors)
-        mean_pre_action_yaw_error, std_pre_action_yaw_error = mean_and_std(completed_pre_action_yaw_errors)
-        failure_rate, _ = mean_and_std(completed_failures)
-        timeout_rate, _ = mean_and_std(completed_timeouts)
+            def selected(values: list[float]) -> list[float]:
+                return [values[index] for index in indices]
 
-        result = {
-            "task": args_cli.task,
-            "checkpoint": str(Path(resume_path).resolve()),
-            "method": args_cli.method,
-            "seed": agent_cfg.seed,
-            "training_seed": args_cli.training_seed,
-            "evaluation_seed": agent_cfg.seed,
-            "train_delay_min": args_cli.train_delay_min,
-            "train_delay_max": args_cli.train_delay_max,
-            "trace_enabled": bool(
-                getattr(getattr(env_cfg, "memory_trace", None), "enabled", False)
-            ),
-            "trace_decay": getattr(
-                getattr(env_cfg, "memory_trace", None),
-                "decay",
-                None,
-            ),
-            "num_envs": args_cli.num_envs,
-            "num_episodes": args_cli.num_episodes,
-            "test_delay_steps": args_cli.test_delay,
-            "step_dt_seconds": float(core.step_dt),
-            "test_delay_seconds": float(args_cli.test_delay * core.step_dt),
-            "tracking_error_sample_phase": "pre_action",
-            "mean_return": mean_return,
-            "std_return": std_return,
-            "mean_episode_length": mean_length,
-            "std_episode_length": std_length,
-            "mean_pre_action_xy_velocity_error": mean_pre_action_xy_error,
-            "std_pre_action_xy_velocity_error": std_pre_action_xy_error,
-            "mean_pre_action_yaw_velocity_error": mean_pre_action_yaw_error,
-            "std_pre_action_yaw_velocity_error": std_pre_action_yaw_error,
-            "failure_rate": failure_rate,
-            "timeout_rate": timeout_rate,
-            "vector_steps": vector_steps,
-        }
+            mean_return, std_return = mean_and_std(selected(completed_returns))
+            mean_length, std_length = mean_and_std(selected(completed_lengths))
+            mean_pre_action_xy_error, std_pre_action_xy_error = mean_and_std(
+                selected(completed_pre_action_xy_errors)
+            )
+            mean_pre_action_yaw_error, std_pre_action_yaw_error = mean_and_std(
+                selected(completed_pre_action_yaw_errors)
+            )
+            failure_rate, _ = mean_and_std(selected(completed_failures))
+            timeout_rate, _ = mean_and_std(selected(completed_timeouts))
 
-        output_path = Path(args_cli.output).expanduser().resolve()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+            result = {
+                "task": args_cli.task,
+                "checkpoint": str(Path(resume_path).resolve()),
+                "selected_by_validation": checkpoint_selection is not None,
+                "checkpoint_selection": checkpoint_selection,
+                "method": args_cli.method,
+                "seed": agent_cfg.seed,
+                "training_seed": args_cli.training_seed,
+                "evaluation_seed": agent_cfg.seed,
+                "train_delay_min": args_cli.train_delay_min,
+                "train_delay_max": args_cli.train_delay_max,
+                "trace_enabled": bool(getattr(getattr(env_cfg, "memory_trace", None), "enabled", False)),
+                "trace_decay": getattr(getattr(env_cfg, "memory_trace", None), "decay", None),
+                "policy_history_length": getattr(
+                    getattr(getattr(env_cfg, "observations", None), "policy", None),
+                    "history_length",
+                    1,
+                ),
+                "num_envs": group_sizes[test_delay],
+                "paired_num_envs_total": args_cli.num_envs,
+                "paired_delay_grid": list(test_delays),
+                "num_episodes": args_cli.num_episodes,
+                "test_delay_steps": test_delay,
+                "step_dt_seconds": float(core.step_dt),
+                "test_delay_seconds": float(test_delay * core.step_dt),
+                "tracking_error_sample_phase": "pre_action",
+                "mean_return": mean_return,
+                "std_return": std_return,
+                "mean_episode_length": mean_length,
+                "std_episode_length": std_length,
+                "mean_pre_action_xy_velocity_error": mean_pre_action_xy_error,
+                "std_pre_action_xy_velocity_error": std_pre_action_xy_error,
+                "mean_pre_action_yaw_velocity_error": mean_pre_action_yaw_error,
+                "std_pre_action_yaw_velocity_error": std_pre_action_yaw_error,
+                "failure_rate": failure_rate,
+                "timeout_rate": timeout_rate,
+                "vector_steps": vector_steps,
+            }
 
-        with output_path.open("w", encoding="utf-8") as file:
-            json.dump(result, file, indent=2)
+            output_path = Path(args_cli.output.format(test_delay=test_delay)).expanduser().resolve()
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with output_path.open("w", encoding="utf-8") as file:
+                json.dump(result, file, indent=2)
 
-        print(json.dumps(result, indent=2))
-        print(f"[INFO] Saved evaluation to: {output_path}")
+            print(json.dumps(result, indent=2))
+            print(f"[INFO] Saved evaluation to: {output_path}")
 
     finally:
         if env is not None:

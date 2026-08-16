@@ -9,6 +9,7 @@
 
 import argparse
 import sys
+from pathlib import Path
 
 from isaaclab.app import AppLauncher
 
@@ -39,6 +40,16 @@ parser.add_argument(
     default=None,
     help="Maximum episode-fixed action delay used during training.",
 )
+parser.add_argument("--training_validation", action="store_true", help="Validate saved checkpoints during training.")
+parser.add_argument("--validation_method", type=str, default=None, help="Method key stored in validation results.")
+parser.add_argument("--validation_seed", action="append", type=int, default=[], help="Repeat for validation seeds.")
+parser.add_argument("--validation_delay", action="append", type=int, default=[], help="Repeat for validation delays.")
+parser.add_argument("--validation_interval", type=int, default=100, help="Validation interval in learning iterations.")
+parser.add_argument("--validation_start_iteration", type=int, default=100)
+parser.add_argument("--validation_num_envs", type=int, default=256)
+parser.add_argument("--validation_num_episodes", type=int, default=256)
+parser.add_argument("--validation_device", type=str, default=None)
+parser.add_argument("--validation_lock", type=str, default=None, help="Shared lock file for the validation GPU.")
 parser.add_argument(
     "--distributed", action="store_true", default=False, help="Run training with multiple GPUs or nodes."
 )
@@ -117,6 +128,7 @@ logger = logging.getLogger(__name__)
 
 import memory_trace_delay.tasks  # noqa: F401
 from memory_trace_delay.rsl_rl_trace_wrapper import wrap_rsl_rl_env
+from training_validation import TrainingValidator, ValidationSettings
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -133,6 +145,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     agent_cfg.max_iterations = (
         args_cli.max_iterations if args_cli.max_iterations is not None else agent_cfg.max_iterations
     )
+
+    if args_cli.training_validation:
+        if not args_cli.validation_method:
+            raise ValueError("--validation_method is required when training validation is enabled.")
+        if not args_cli.validation_seed or not args_cli.validation_delay:
+            raise ValueError("At least one --validation_seed and --validation_delay are required.")
+        if args_cli.validation_device is None or args_cli.validation_lock is None:
+            raise ValueError("--validation_device and --validation_lock are required.")
+        if args_cli.validation_interval % agent_cfg.save_interval != 0:
+            raise ValueError("validation_interval must be a multiple of the RSL-RL save_interval.")
 
     # set the environment seed
     # note: certain randomizations occur in the environment initialization so we set the seed here
@@ -234,6 +256,54 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # dump the configuration into log-directory
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
+
+    if args_cli.training_validation:
+        if not isinstance(runner, OnPolicyRunner) or isinstance(runner, DistillationRunner):
+            raise ValueError("Training-time validation currently supports OnPolicyRunner PPO training only.")
+        validation_settings = ValidationSettings(
+            method_key=args_cli.validation_method,
+            task=args_cli.task,
+            training_seed=agent_cfg.seed,
+            train_delay_min=env_cfg.action_delay.min_steps,
+            train_delay_max=env_cfg.action_delay.max_steps,
+            evaluation_seeds=tuple(args_cli.validation_seed),
+            test_delays=tuple(args_cli.validation_delay),
+            interval=args_cli.validation_interval,
+            start_iteration=args_cli.validation_start_iteration,
+            num_envs=args_cli.validation_num_envs,
+            num_episodes=args_cli.validation_num_episodes,
+            device=args_cli.validation_device,
+            lock_path=Path(args_cli.validation_lock).expanduser().resolve(),
+            extra_args=tuple(hydra_args),
+        )
+        validator = TrainingValidator(
+            validation_settings,
+            run_dir=Path(log_dir),
+            python_executable=sys.executable,
+            evaluator_script=Path(__file__).with_name("evaluate_delay.py"),
+        )
+        original_save = runner.save
+        validation_final_iteration = int(runner.current_learning_iteration) + agent_cfg.max_iterations - 1
+
+        def save_and_validate(path: str, infos: dict | None = None) -> None:
+            original_save(path, infos)
+            iteration = int(runner.current_learning_iteration)
+            summary = validator.validate_if_due(
+                Path(path),
+                iteration=iteration,
+                final_iteration=validation_final_iteration,
+            )
+            if summary is not None and runner.writer is not None:
+                runner.writer.add_scalar("Validation/delay_auc", summary["delay_auc"], iteration)
+                runner.writer.add_scalar("Validation/worst_return", summary["worst_return"], iteration)
+                runner.writer.add_scalar("Validation/mean_failure_rate", summary["mean_failure_rate"], iteration)
+                runner.writer.add_scalar(
+                    "Validation/wall_time_seconds", summary["validation_wall_time_seconds"], iteration
+                )
+                runner.writer.add_scalar("Validation/became_best", float(summary["became_best"]), iteration)
+                runner.writer.flush()
+
+        runner.save = save_and_validate
 
     # run training
     runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)

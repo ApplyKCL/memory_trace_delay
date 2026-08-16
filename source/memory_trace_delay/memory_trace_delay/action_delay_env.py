@@ -22,6 +22,7 @@ class ActionDelayManagerBasedRLEnv(ManagerBasedRLEnv):
 
     def __init__(self, cfg, render_mode: str | None = None, **kwargs) -> None:
         self._action_delay_buffer: ActionDelayBuffer | None = None
+        self._forced_action_delay_steps: torch.Tensor | None = None
         self._last_policy_action: torch.Tensor | None = None
         self._last_delayed_action: torch.Tensor | None = None
         super().__init__(cfg=cfg, render_mode=render_mode, **kwargs)
@@ -53,6 +54,19 @@ class ActionDelayManagerBasedRLEnv(ManagerBasedRLEnv):
     def last_delayed_action(self) -> torch.Tensor | None:
         return self._last_delayed_action
 
+    def set_forced_action_delays(self, delay_steps: torch.Tensor | None) -> None:
+        """Force one persistent delay per environment, primarily for paired evaluation."""
+        if delay_steps is None:
+            self._forced_action_delay_steps = None
+            return
+        delays = torch.as_tensor(delay_steps, device=self.device, dtype=torch.long).flatten()
+        if delays.numel() != self.num_envs:
+            raise ValueError(f"Expected {self.num_envs} forced delays, received {delays.numel()}.")
+        if torch.any(delays < 0) or torch.any(delays > self.action_delay_buffer.max_delay):
+            raise ValueError(f"Forced delays must be in [0, {self.action_delay_buffer.max_delay}].")
+        self._forced_action_delay_steps = delays.clone()
+        self.action_delay_buffer.reset(delay_steps=self._forced_action_delay_steps)
+
     def step(self, action: torch.Tensor) -> VecEnvStepReturn:
         policy_action = action.to(self.device)
         delayed_action = self.action_delay_buffer.push(policy_action)
@@ -66,4 +80,7 @@ class ActionDelayManagerBasedRLEnv(ManagerBasedRLEnv):
     def _reset_idx(self, env_ids: Sequence[int]) -> None:
         super()._reset_idx(env_ids)
         if self._action_delay_buffer is not None:
-            self._action_delay_buffer.reset(env_ids)
+            forced_delays = None
+            if self._forced_action_delay_steps is not None:
+                forced_delays = self._forced_action_delay_steps[env_ids]
+            self._action_delay_buffer.reset(env_ids, delay_steps=forced_delays)

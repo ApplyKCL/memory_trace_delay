@@ -7,12 +7,16 @@
     "Set evaluation.enabled=false to train without evaluating.",
     "Add normal CLI or Hydra overrides to a stage's extra_args list.",
     "GPU workers dynamically pull independent method-by-seed jobs from one shared queue.",
-    "All methods are retrained from scratch using training seeds 42, 43, and 44."
+    "Every configured model is retrained in a new timestamped run.",
+    "Periodic checkpoints are validated during training on the reserved validation GPU.",
+    "Final evaluation automatically consumes each run's validation-selected best_model.pt."
   ],
   "continue_on_error": false,
   "execution": {
-    "gpus": [0, 1, 2, 3],
-    "training_workers": 4,
+    "training_gpus": [0, 1, 2],
+    "validation_gpu": 3,
+    "evaluation_gpus": [0, 1, 2, 3],
+    "training_workers": 3,
     "evaluation_workers": 4
   },
   "common": {
@@ -23,13 +27,23 @@
       "max_iterations": 500,
       "device": "cuda:0",
       "headless": true,
+      "validation": {
+        "enabled": true,
+        "seeds": [901, 902],
+        "test_delays": [0, 2, 4, 6],
+        "interval": 100,
+        "start_iteration": 100,
+        "num_envs": 256,
+        "num_episodes": 256,
+        "lock_file": "logs/rsl_rl/.locks/training_validation_gpu3.lock"
+      },
       "extra_args": []
     },
     "evaluation": {
       "enabled": true,
       "training_seeds": [42, 43, 44],
-      "seeds": [123],
-      "test_delays": [0, 2, 4, 6],
+      "seeds": [123, 124, 125],
+      "test_delays": [0, 1, 2, 3, 4, 5, 6],
       "num_envs": 256,
       "num_episodes": 1024,
       "device": "cuda:0",
@@ -56,7 +70,7 @@
       },
       "evaluation": {
         "enabled": true,
-        "output_dir": "results/mlp",
+        "output_dir": "results/final_best/mlp",
         "result_filename": "train0_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
         "extra_args": []
       }
@@ -78,7 +92,7 @@
       },
       "evaluation": {
         "enabled": true,
-        "output_dir": "results/mlp",
+        "output_dir": "results/final_best/mlp",
         "result_filename": "train2_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
         "extra_args": []
       }
@@ -91,7 +105,7 @@
       "experiment_name": "memory_trace_delay_go2_flat_baseline",
       "training": {
         "enabled": true,
-        "seeds": [42, 43, 44],
+        "seeds": [42, 43, 44, 45, 46],
         "delay_min": 0,
         "delay_max": 4,
         "run_name": "delay0to4_random_seed{training_seed}_full",
@@ -100,7 +114,8 @@
       },
       "evaluation": {
         "enabled": true,
-        "output_dir": "results/mlp",
+        "training_seeds": [42, 43, 44, 45, 46],
+        "output_dir": "results/final_best/mlp",
         "result_filename": "train0to4_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
         "extra_args": []
       }
@@ -122,7 +137,7 @@
       },
       "evaluation": {
         "enabled": true,
-        "output_dir": "results/stack",
+        "output_dir": "results/final_best/stack",
         "result_filename": "stack5_train0_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
         "extra_args": []
       }
@@ -144,7 +159,7 @@
       },
       "evaluation": {
         "enabled": true,
-        "output_dir": "results/stack",
+        "output_dir": "results/final_best/stack",
         "result_filename": "stack5_train2_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
         "extra_args": []
       }
@@ -157,7 +172,7 @@
       "experiment_name": "memory_trace_delay_go2_flat_stack",
       "training": {
         "enabled": true,
-        "seeds": [42, 43, 44],
+        "seeds": [42, 43, 44, 45, 46],
         "delay_min": 0,
         "delay_max": 4,
         "run_name": "stack5_delay0to4_seed{training_seed}_full",
@@ -166,9 +181,54 @@
       },
       "evaluation": {
         "enabled": true,
-        "output_dir": "results/stack",
+        "training_seeds": [42, 43, 44, 45, 46],
+        "output_dir": "results/final_best/stack",
         "result_filename": "stack5_train0to4_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
         "extra_args": []
+      }
+    },
+    {
+      "key": "stack2",
+      "name": "Stack-PPO with two observations trained with random delay 0-4",
+      "enabled": true,
+      "task": "MemoryTrace-Stack-Velocity-Flat-Unitree-Go2-v0",
+      "experiment_name": "memory_trace_delay_go2_flat_stack",
+      "training": {
+        "enabled": true,
+        "seeds": [42, 43, 44],
+        "delay_min": 0,
+        "delay_max": 4,
+        "run_name": "stack2_delay0to4_seed{training_seed}_full",
+        "checkpoint_glob": "logs/rsl_rl/memory_trace_delay_go2_flat_stack/*_stack2_delay0to4_seed{training_seed}_full/model_*.pt",
+        "extra_args": ["env.observations.policy.history_length=2"]
+      },
+      "evaluation": {
+        "enabled": true,
+        "output_dir": "results/final_best/stack",
+        "result_filename": "stack2_train0to4_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
+        "extra_args": ["env.observations.policy.history_length=2"]
+      }
+    },
+    {
+      "key": "stack8",
+      "name": "Stack-PPO with eight observations trained with random delay 0-4",
+      "enabled": true,
+      "task": "MemoryTrace-Stack-Velocity-Flat-Unitree-Go2-v0",
+      "experiment_name": "memory_trace_delay_go2_flat_stack",
+      "training": {
+        "enabled": true,
+        "seeds": [42, 43, 44],
+        "delay_min": 0,
+        "delay_max": 4,
+        "run_name": "stack8_delay0to4_seed{training_seed}_full",
+        "checkpoint_glob": "logs/rsl_rl/memory_trace_delay_go2_flat_stack/*_stack8_delay0to4_seed{training_seed}_full/model_*.pt",
+        "extra_args": ["env.observations.policy.history_length=8"]
+      },
+      "evaluation": {
+        "enabled": true,
+        "output_dir": "results/final_best/stack",
+        "result_filename": "stack8_train0to4_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
+        "extra_args": ["env.observations.policy.history_length=8"]
       }
     },
     {
@@ -188,7 +248,7 @@
       },
       "evaluation": {
         "enabled": true,
-        "output_dir": "results/trace",
+        "output_dir": "results/final_best/trace",
         "result_filename": "trace08_train0_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
         "extra_args": []
       }
@@ -210,7 +270,7 @@
       },
       "evaluation": {
         "enabled": true,
-        "output_dir": "results/trace",
+        "output_dir": "results/final_best/trace",
         "result_filename": "trace08_train2_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
         "extra_args": []
       }
@@ -223,7 +283,7 @@
       "experiment_name": "memory_trace_delay_go2_flat_trace",
       "training": {
         "enabled": true,
-        "seeds": [42, 43, 44],
+        "seeds": [42, 43, 44, 45, 46],
         "delay_min": 0,
         "delay_max": 4,
         "run_name": "trace08_delay0to4_seed{training_seed}_full",
@@ -232,19 +292,68 @@
       },
       "evaluation": {
         "enabled": true,
-        "output_dir": "results/trace",
+        "training_seeds": [42, 43, 44, 45, 46],
+        "output_dir": "results/final_best/trace",
         "result_filename": "trace08_train0to4_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
         "extra_args": []
+      }
+    },
+    {
+      "key": "trace05",
+      "name": "Trace-PPO with decay 0.5 trained with random delay 0-4",
+      "enabled": true,
+      "task": "MemoryTrace-Trace-Velocity-Flat-Unitree-Go2-v0",
+      "experiment_name": "memory_trace_delay_go2_flat_trace",
+      "training": {
+        "enabled": true,
+        "seeds": [42, 43, 44],
+        "delay_min": 0,
+        "delay_max": 4,
+        "run_name": "trace05_delay0to4_seed{training_seed}_full",
+        "checkpoint_glob": "logs/rsl_rl/memory_trace_delay_go2_flat_trace/*_trace05_delay0to4_seed{training_seed}_full/model_*.pt",
+        "extra_args": ["env.memory_trace.decay=0.5"]
+      },
+      "evaluation": {
+        "enabled": true,
+        "output_dir": "results/final_best/trace",
+        "result_filename": "trace05_train0to4_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
+        "extra_args": ["env.memory_trace.decay=0.5"]
+      }
+    },
+    {
+      "key": "trace0875",
+      "name": "Trace-PPO with decay 0.875 trained with random delay 0-4",
+      "enabled": true,
+      "task": "MemoryTrace-Trace-Velocity-Flat-Unitree-Go2-v0",
+      "experiment_name": "memory_trace_delay_go2_flat_trace",
+      "training": {
+        "enabled": true,
+        "seeds": [42, 43, 44],
+        "delay_min": 0,
+        "delay_max": 4,
+        "run_name": "trace0875_delay0to4_seed{training_seed}_full",
+        "checkpoint_glob": "logs/rsl_rl/memory_trace_delay_go2_flat_trace/*_trace0875_delay0to4_seed{training_seed}_full/model_*.pt",
+        "extra_args": ["env.memory_trace.decay=0.875"]
+      },
+      "evaluation": {
+        "enabled": true,
+        "output_dir": "results/final_best/trace",
+        "result_filename": "trace0875_train0to4_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
+        "extra_args": ["env.memory_trace.decay=0.875"]
       }
     }
   ],
   "analysis": {
     "enabled": true,
-    "mlp_dir": "results/mlp",
-    "stack_dir": "results/stack",
-    "trace_dir": "results/trace",
-    "output_csv": "results/combined_summary.csv",
-    "figure_dir": "results/figures",
+    "mlp_dir": "results/final_best/mlp",
+    "stack_dir": "results/final_best/stack",
+    "trace_dir": "results/final_best/trace",
+    "output_csv": "results/final_best/combined_summary.csv",
+    "figure_dir": "results/final_best/figures",
+    "benchmark_dir": "results/final_best/benchmarks",
+    "benchmark_backend": "torchscript",
+    "benchmark_device": "cpu",
+    "engineering_csv": "results/final_best/engineering_summary.csv",
     "extra_args": []
   }
 }

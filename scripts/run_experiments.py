@@ -18,7 +18,9 @@ DEFAULT_CONFIG = "configs/experiments/train.json"
 
 
 class ExecutionSettings(NamedTuple):
-    gpus: tuple[int, ...]
+    training_gpus: tuple[int, ...]
+    validation_gpu: int | None
+    evaluation_gpus: tuple[int, ...]
     training_workers: int
     evaluation_workers: int
 
@@ -119,28 +121,41 @@ def load_execution_settings(config: dict[str, Any]) -> ExecutionSettings:
     if not isinstance(execution, dict):
         raise ValueError("execution must be an object.")
 
-    gpu_value = execution.get("gpus", [])
-    if not isinstance(gpu_value, list) or not all(isinstance(gpu, int) and gpu >= 0 for gpu in gpu_value):
-        raise ValueError("execution.gpus must be a list of non-negative integers.")
-    if len(set(gpu_value)) != len(gpu_value):
-        raise ValueError("execution.gpus must not contain duplicates.")
+    legacy_gpus = execution.get("gpus", [])
 
-    default_workers = len(gpu_value) or 1
+    def gpu_list(field: str, default: Any) -> tuple[int, ...]:
+        value = execution.get(field, default)
+        if not isinstance(value, list) or not all(isinstance(gpu, int) and gpu >= 0 for gpu in value):
+            raise ValueError(f"execution.{field} must be a list of non-negative integers.")
+        if len(set(value)) != len(value):
+            raise ValueError(f"execution.{field} must not contain duplicates.")
+        return tuple(value)
 
-    def worker_count(field: str) -> int:
+    training_gpus = gpu_list("training_gpus", legacy_gpus)
+    evaluation_gpus = gpu_list("evaluation_gpus", legacy_gpus)
+    validation_gpu = execution.get("validation_gpu")
+    if validation_gpu is not None and (not isinstance(validation_gpu, int) or validation_gpu < 0):
+        raise ValueError("execution.validation_gpu must be a non-negative integer or null.")
+    if validation_gpu is not None and validation_gpu in training_gpus:
+        raise ValueError("execution.validation_gpu must be reserved and absent from training_gpus.")
+
+    def worker_count(field: str, gpus: tuple[int, ...]) -> int:
+        default_workers = len(gpus) or 1
         value = execution.get(field, default_workers)
         if not isinstance(value, int) or value <= 0:
             raise ValueError(f"execution.{field} must be a positive integer.")
-        if gpu_value and value > len(gpu_value):
+        if gpus and value > len(gpus):
             raise ValueError(f"execution.{field} cannot exceed the number of configured GPUs.")
-        if not gpu_value and value != 1:
-            raise ValueError(f"execution.{field} must be 1 when execution.gpus is empty.")
+        if not gpus and value != 1:
+            raise ValueError(f"execution.{field} must be 1 when its GPU list is empty.")
         return value
 
     return ExecutionSettings(
-        gpus=tuple(gpu_value),
-        training_workers=worker_count("training_workers"),
-        evaluation_workers=worker_count("evaluation_workers"),
+        training_gpus=training_gpus,
+        validation_gpu=validation_gpu,
+        evaluation_gpus=evaluation_gpus,
+        training_workers=worker_count("training_workers", training_gpus),
+        evaluation_workers=worker_count("evaluation_workers", evaluation_gpus),
     )
 
 
@@ -148,6 +163,13 @@ def _positive_integer(config: dict[str, Any], field: str) -> int:
     value = config.get(field)
     if not isinstance(value, int) or value <= 0:
         raise ValueError(f"{field} must be a positive integer.")
+    return value
+
+
+def _non_negative_integer(config: dict[str, Any], field: str) -> int:
+    value = config.get(field)
+    if not isinstance(value, int) or value < 0:
+        raise ValueError(f"{field} must be a non-negative integer.")
     return value
 
 
@@ -196,6 +218,54 @@ def build_train_command(
     _append_option(command, "--device", train_cfg.get("device"))
     if train_cfg.get("headless", True):
         command.append("--headless")
+    validation = train_cfg.get("validation", {})
+    if validation:
+        if not isinstance(validation, dict):
+            raise ValueError(f"{method['key']}: training.validation must be an object.")
+        if validation.get("enabled", False):
+            validation_seeds = _integer_list(
+                validation.get("seeds"),
+                f"{method['key']} training validation seeds",
+                non_negative=True,
+            )
+            validation_delays = _integer_list(
+                validation.get("test_delays"),
+                f"{method['key']} training validation test_delays",
+                non_negative=True,
+            )
+            if len(set(validation_seeds)) != len(validation_seeds):
+                raise ValueError(f"{method['key']}: training validation seeds must not contain duplicates.")
+            if len(set(validation_delays)) != len(validation_delays):
+                raise ValueError(f"{method['key']}: training validation delays must not contain duplicates.")
+            validation_device = validation.get("device")
+            if not isinstance(validation_device, str) or not validation_device:
+                raise ValueError(f"{method['key']}: training validation device is required.")
+            lock_file = validation.get("lock_file", "logs/rsl_rl/.locks/training_validation.lock")
+            lock_path = Path(str(lock_file)).expanduser()
+            lock_path = lock_path if lock_path.is_absolute() else repo_root / lock_path
+            command.extend(
+                (
+                    "--training_validation",
+                    "--validation_method",
+                    method["key"],
+                    "--validation_interval",
+                    str(_positive_integer(validation, "interval")),
+                    "--validation_start_iteration",
+                    str(_non_negative_integer(validation, "start_iteration")),
+                    "--validation_num_envs",
+                    str(_positive_integer(validation, "num_envs")),
+                    "--validation_num_episodes",
+                    str(_positive_integer(validation, "num_episodes")),
+                    "--validation_device",
+                    validation_device,
+                    "--validation_lock",
+                    str(lock_path.resolve()),
+                )
+            )
+            for validation_seed in validation_seeds:
+                command.extend(("--validation_seed", str(validation_seed)))
+            for validation_delay in validation_delays:
+                command.extend(("--validation_delay", str(validation_delay)))
     command.extend(_string_list(train_cfg.get("extra_args", []), "training extra_args"))
     return command, run_name
 
@@ -263,6 +333,18 @@ def find_trained_checkpoint(repo_root: Path, experiment_name: str, run_name: str
     return select_latest_checkpoint(candidates).resolve()
 
 
+def find_best_checkpoint(repo_root: Path, experiment_name: str, run_name: str) -> Path:
+    """Return the validation-selected model from the newest matching run."""
+    log_root = repo_root / "logs" / "rsl_rl" / experiment_name
+    run_dirs = sorted(path for path in log_root.glob(f"*_{run_name}") if path.is_dir())
+    for run_dir in reversed(run_dirs):
+        checkpoint = run_dir / "best_model.pt"
+        manifest = run_dir / "best_checkpoint.json"
+        if checkpoint.is_file() and manifest.is_file():
+            return checkpoint.resolve()
+    raise FileNotFoundError(f"No validation-selected checkpoint found for {experiment_name}/{run_name}.")
+
+
 def resolve_configured_checkpoint(
     repo_root: Path,
     method: dict[str, Any],
@@ -282,6 +364,19 @@ def resolve_configured_checkpoint(
             if not path.is_file() and not dry_run:
                 raise FileNotFoundError(f"Configured checkpoint does not exist: {path}")
             return str(path.resolve()) if path.exists() else str(path)
+
+    validation = train_cfg.get("validation", {})
+    if isinstance(validation, dict) and validation.get("enabled", False):
+        run_name_template = train_cfg.get("run_name")
+        if not isinstance(run_name_template, str) or not run_name_template:
+            raise ValueError(f"{method['key']}: training.run_name is required to locate best_model.pt.")
+        run_name = run_name_template.format(seed=training_seed, training_seed=training_seed)
+        try:
+            return str(find_best_checkpoint(repo_root, method["experiment_name"], run_name))
+        except FileNotFoundError:
+            if dry_run:
+                return f"<best:{method['key']}:train-seed-{training_seed}>"
+            raise
 
     pattern_template = train_cfg.get("checkpoint_glob")
     if not isinstance(pattern_template, str) or not pattern_template:
@@ -448,6 +543,10 @@ def build_analysis_command(
         "trace_dir": "--trace_dir",
         "output_csv": "--output_csv",
         "figure_dir": "--figure_dir",
+        "benchmark_dir": "--benchmark_dir",
+        "benchmark_backend": "--benchmark_backend",
+        "benchmark_device": "--benchmark_device",
+        "engineering_csv": "--engineering_csv",
     }
     for field, option in option_names.items():
         _append_option(command, option, analysis_cfg.get(field))
@@ -566,19 +665,35 @@ def main() -> int:
     commands_run = 0
     commands_skipped = 0
 
-    gpu_pool = ", ".join(f"cuda:{gpu}" for gpu in execution.gpus) if execution.gpus else "configured devices"
+    training_pool = (
+        ", ".join(f"cuda:{gpu}" for gpu in execution.training_gpus) if execution.training_gpus else "configured devices"
+    )
+    evaluation_pool = (
+        ", ".join(f"cuda:{gpu}" for gpu in execution.evaluation_gpus)
+        if execution.evaluation_gpus
+        else "configured devices"
+    )
     print(f"[INFO] Config: {config_path.resolve()}")
     print(f"[INFO] Methods: {', '.join(method['key'] for method in selected)}")
     print(f"[INFO] Mode: {'dry-run' if args.dry_run else 'execute'}")
-    print(f"[INFO] GPU pool: {gpu_pool}")
+    print(f"[INFO] Training GPUs: {training_pool}")
+    print(f"[INFO] Validation GPU: {execution.validation_gpu}")
+    print(f"[INFO] Final-evaluation GPUs: {evaluation_pool}")
     print(f"[INFO] Workers: training={execution.training_workers}, evaluation={execution.evaluation_workers}")
 
     method_contexts: list[MethodContext] = []
     training_jobs: list[CommandJob] = []
-    training_metadata: dict[str, tuple[dict[str, Any], int, str]] = {}
+    training_metadata: dict[str, tuple[dict[str, Any], int, str, bool]] = {}
 
     for method in selected:
         train_cfg = merge_stage_config(common_train, method.get("training", {}))
+        validation_cfg = train_cfg.get("validation", {})
+        if isinstance(validation_cfg, dict) and validation_cfg.get("enabled", False):
+            if execution.validation_gpu is None:
+                raise ValueError("Training-time validation requires execution.validation_gpu.")
+            validation_cfg = dict(validation_cfg)
+            validation_cfg["device"] = f"cuda:{execution.validation_gpu}"
+            train_cfg["validation"] = validation_cfg
         evaluation_cfg = merge_stage_config(common_evaluation, method.get("evaluation", {}))
         training_seeds = _integer_list(train_cfg.get("seeds"), f"{method['key']} training seeds")
         train_enabled = bool(train_cfg.get("enabled", True)) and not args.skip_train
@@ -605,20 +720,25 @@ def main() -> int:
             command, run_name = build_train_command(repo_root, python_executable, method, train_cfg, training_seed)
             label = f"train:{method['key']}:seed-{training_seed}"
             training_jobs.append(CommandJob(label, tuple(command)))
-            training_metadata[label] = (method, training_seed, run_name)
+            training_metadata[label] = (
+                method,
+                training_seed,
+                run_name,
+                isinstance(validation_cfg, dict) and validation_cfg.get("enabled", False),
+            )
 
     if training_jobs:
         print(f"\n[PHASE] Training jobs: {len(training_jobs)}")
         training_results = run_job_batch(
             training_jobs,
             repo_root,
-            gpus=execution.gpus,
+            gpus=execution.training_gpus,
             workers=execution.training_workers,
             dry_run=args.dry_run,
             continue_on_error=continue_on_error,
         )
         for result in training_results:
-            method, training_seed, run_name = training_metadata[result.job.label]
+            method, training_seed, run_name, training_validation_enabled = training_metadata[result.job.label]
             key = (method["key"], training_seed)
             if result.error is not None:
                 failed_training.add(key)
@@ -629,10 +749,13 @@ def main() -> int:
 
             commands_run += 1
             if args.dry_run:
-                generated_checkpoints[key] = f"<checkpoint-generated:{method['key']}:train-seed-{training_seed}>"
+                generated_checkpoints[key] = f"<best-generated:{method['key']}:train-seed-{training_seed}>"
                 continue
             try:
-                checkpoint = find_trained_checkpoint(repo_root, method["experiment_name"], run_name)
+                if training_validation_enabled:
+                    checkpoint = find_best_checkpoint(repo_root, method["experiment_name"], run_name)
+                else:
+                    checkpoint = find_trained_checkpoint(repo_root, method["experiment_name"], run_name)
                 generated_checkpoints[key] = str(checkpoint)
                 print(f"[CHECKPOINT] {checkpoint}")
             except (OSError, ValueError) as error:
@@ -662,7 +785,7 @@ def main() -> int:
         evaluation_results = run_job_batch(
             evaluation_jobs,
             repo_root,
-            gpus=execution.gpus,
+            gpus=execution.evaluation_gpus,
             workers=execution.evaluation_workers,
             dry_run=args.dry_run,
             continue_on_error=continue_on_error,
