@@ -29,25 +29,37 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def parse_mlp_filename(path: Path) -> tuple[str, int, int]:
-    match = re.match(r"^(train0to4|train0|train2)_test(\d+)_seed(\d+)\.json$", path.name)
+def parse_mlp_filename(path: Path) -> tuple[str, int, int, int | None]:
+    match = re.match(
+        r"^(train0to4|train0|train2)(?:_trainseed(\d+))?_test(\d+)_(?:seed|evalseed)(\d+)\.json$",
+        path.name,
+    )
     if match is None:
         raise ValueError(f"Unexpected MLP filename: {path.name}")
-    return match.group(1), int(match.group(2)), int(match.group(3))
+    training_seed = int(match.group(2)) if match.group(2) is not None else None
+    return match.group(1), int(match.group(3)), int(match.group(4)), training_seed
 
 
-def parse_stack_filename(path: Path) -> tuple[str, int, int]:
-    match = re.match(r"^stack5_train0to4_test(\d+)_seed(\d+)\.json$", path.name)
+def parse_stack_filename(path: Path) -> tuple[str, int, int, int | None]:
+    match = re.match(
+        r"^stack5_train0to4(?:_trainseed(\d+))?_test(\d+)_(?:seed|evalseed)(\d+)\.json$",
+        path.name,
+    )
     if match is None:
         raise ValueError(f"Unexpected Stack filename: {path.name}")
-    return "stack5", int(match.group(1)), int(match.group(2))
+    training_seed = int(match.group(1)) if match.group(1) is not None else None
+    return "stack5", int(match.group(2)), int(match.group(3)), training_seed
 
 
-def parse_trace_filename(path: Path) -> tuple[str, int, int]:
-    match = re.match(r"^(?:trace|trace08)_train0to4_test(\d+)_seed(\d+)\.json$", path.name)
+def parse_trace_filename(path: Path) -> tuple[str, int, int, int | None]:
+    match = re.match(
+        r"^(?:trace|trace08)_train0to4(?:_trainseed(\d+))?_test(\d+)_(?:seed|evalseed)(\d+)\.json$",
+        path.name,
+    )
     if match is None:
         raise ValueError(f"Unexpected Trace filename: {path.name}")
-    return "trace08", int(match.group(1)), int(match.group(2))
+    training_seed = int(match.group(1)) if match.group(1) is not None else None
+    return "trace08", int(match.group(2)), int(match.group(3)), training_seed
 
 
 def read_json(path: Path) -> dict:
@@ -72,6 +84,7 @@ def make_row(
     method_key: str,
     filename_test_delay: int,
     filename_eval_seed: int,
+    filename_training_seed: int | None = None,
 ) -> dict:
     test_delay = int(result.get("test_delay_steps", filename_test_delay))
     evaluation_seed = int(result.get("evaluation_seed", result.get("seed", filename_eval_seed)))
@@ -85,11 +98,17 @@ def make_row(
             f"Filename evaluation seed {filename_eval_seed} disagrees with JSON seed {evaluation_seed}."
         )
 
+    training_seed = infer_training_seed(result)
+    if filename_training_seed is not None and training_seed != filename_training_seed:
+        raise ValueError(
+            f"Filename training seed {filename_training_seed} disagrees with JSON/checkpoint seed {training_seed}."
+        )
+
     return {
         "method_key": method_key,
         "method": METHOD_LABELS[method_key],
         "test_delay": test_delay,
-        "training_seed": infer_training_seed(result),
+        "training_seed": training_seed,
         "evaluation_seed": evaluation_seed,
         "mean_return": result["mean_return"],
         "std_return_within_episodes": result["std_return"],
@@ -113,11 +132,11 @@ def load_results(directory: Path, filename_parser) -> list[dict]:
 
     for path in sorted(directory.glob("*.json")):
         try:
-            method_key, test_delay, evaluation_seed = filename_parser(path)
+            method_key, test_delay, evaluation_seed, training_seed = filename_parser(path)
         except ValueError:
             print(f"[SKIP] {path}")
             continue
-        rows.append(make_row(read_json(path), method_key, test_delay, evaluation_seed))
+        rows.append(make_row(read_json(path), method_key, test_delay, evaluation_seed, training_seed))
     return rows
 
 

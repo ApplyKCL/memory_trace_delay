@@ -36,6 +36,22 @@ def test_make_row_rejects_filename_metadata_disagreement() -> None:
         module.make_row(result, "trace08", filename_test_delay=2, filename_eval_seed=123)
 
 
+def test_new_multi_seed_filename_is_parsed() -> None:
+    parsed = module.parse_trace_filename(
+        Path("trace08_train0to4_trainseed43_test6_evalseed124.json")
+    )
+    assert parsed == ("trace08", 6, 124, 43)
+
+
+def test_legacy_filename_remains_supported() -> None:
+    assert module.parse_mlp_filename(Path("train0_test2_seed123.json")) == (
+        "train0",
+        2,
+        123,
+        None,
+    )
+
+
 def test_aggregation_averages_evaluation_seeds_before_training_seeds() -> None:
     rows = [
         {"method_key": "trace08", "test_delay": 2, "training_seed": 1, "mean_return": 10.0},
