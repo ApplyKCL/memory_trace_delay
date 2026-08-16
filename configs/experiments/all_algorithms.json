@@ -7,7 +7,7 @@
     "Set evaluation.enabled=false to train without evaluating.",
     "Add normal CLI or Hydra overrides to a stage's extra_args list.",
     "GPU workers dynamically pull independent method-by-seed jobs from one shared queue.",
-    "Seeds 43 and 44 are scheduled for methods that already have tracked seed-42 results."
+    "All methods are retrained from scratch using training seeds 42, 43, and 44."
   ],
   "continue_on_error": false,
   "execution": {
@@ -20,7 +20,7 @@
       "enabled": true,
       "seeds": [42, 43, 44],
       "num_envs": 4096,
-      "max_iterations": 300,
+      "max_iterations": 500,
       "device": "cuda:0",
       "headless": true,
       "extra_args": []
@@ -47,7 +47,7 @@
       "experiment_name": "memory_trace_delay_go2_flat_baseline",
       "training": {
         "enabled": true,
-        "seeds": [43, 44],
+        "seeds": [42, 43, 44],
         "delay_min": 0,
         "delay_max": 0,
         "run_name": "delay0_seed{training_seed}_full",
@@ -69,7 +69,7 @@
       "experiment_name": "memory_trace_delay_go2_flat_baseline",
       "training": {
         "enabled": true,
-        "seeds": [43, 44],
+        "seeds": [42, 43, 44],
         "delay_min": 2,
         "delay_max": 2,
         "run_name": "delay2_seed{training_seed}_full",
@@ -91,7 +91,7 @@
       "experiment_name": "memory_trace_delay_go2_flat_baseline",
       "training": {
         "enabled": true,
-        "seeds": [43, 44],
+        "seeds": [42, 43, 44],
         "delay_min": 0,
         "delay_max": 4,
         "run_name": "delay0to4_random_seed{training_seed}_full",
@@ -113,7 +113,7 @@
       "experiment_name": "memory_trace_delay_go2_flat_stack",
       "training": {
         "enabled": true,
-        "seeds": [43, 44],
+        "seeds": [42, 43, 44],
         "delay_min": 0,
         "delay_max": 4,
         "run_name": "stack5_delay0to4_seed{training_seed}_full",
@@ -135,6 +135,7 @@
       "experiment_name": "memory_trace_delay_go2_flat_trace",
       "training": {
         "enabled": true,
+        "seeds": [42, 43, 44],
         "delay_min": 0,
         "delay_max": 4,
         "run_name": "trace08_delay0to4_seed{training_seed}_full",

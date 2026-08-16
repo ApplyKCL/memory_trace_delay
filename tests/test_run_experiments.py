@@ -26,6 +26,7 @@ def sample_method() -> dict:
 
 def test_project_experiment_config_is_valid() -> None:
     config = module.load_config(repo_root / "configs" / "experiments" / "all_algorithms.json")
+
     assert [method["key"] for method in config["methods"]] == [
         "train0",
         "train2",
@@ -33,9 +34,15 @@ def test_project_experiment_config_is_valid() -> None:
         "stack5",
         "trace08",
     ]
-    assert module.load_execution_settings(config) == module.ExecutionSettings((0, 1, 2, 3), 4, 4)
+
+    assert module.load_execution_settings(config) == module.ExecutionSettings(
+        (0, 1, 2, 3), 4, 4
+    )
+
     assert config["common"]["training"]["seeds"] == [42, 43, 44]
-    assert config["methods"][0]["training"]["seeds"] == [43, 44]
+    assert config["common"]["training"]["max_iterations"] == 500
+    assert config["common"]["evaluation"]["training_seeds"] == [42, 43, 44]
+    assert config["common"]["evaluation"]["test_delays"] == [0, 2, 4, 6]
 
 
 def test_duplicate_gpu_is_rejected() -> None:
