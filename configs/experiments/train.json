@@ -1,7 +1,7 @@
 {
   "version": 1,
   "notes": [
-    "Run with: python scripts/run_experiments.py --config configs/experiments/all_algorithms.json",
+    "Run with: python scripts/run_experiments.py --config configs/experiments/train.json",
     "Set method.enabled=false to omit a method.",
     "Set training.enabled=false to reuse checkpoint_glob without retraining.",
     "Set evaluation.enabled=false to train without evaluating.",

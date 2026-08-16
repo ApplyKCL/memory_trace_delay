@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-DEFAULT_CONFIG = "configs/experiments/all_algorithms.json"
+DEFAULT_CONFIG = "configs/experiments/train.json"
 
 
 def build_parser() -> argparse.ArgumentParser:
