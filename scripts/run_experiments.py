@@ -5,14 +5,43 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import queue
 import re
 import shlex
 import subprocess
 import sys
+import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 DEFAULT_CONFIG = "configs/experiments/train.json"
+
+
+class ExecutionSettings(NamedTuple):
+    gpus: tuple[int, ...]
+    training_workers: int
+    evaluation_workers: int
+
+
+class CommandJob(NamedTuple):
+    label: str
+    command: tuple[str, ...]
+
+
+class CommandResult(NamedTuple):
+    job: CommandJob
+    command: tuple[str, ...]
+    gpu: int | None
+    error: BaseException | None
+
+
+class MethodContext(NamedTuple):
+    method: dict[str, Any]
+    training: dict[str, Any]
+    evaluation: dict[str, Any]
+    training_seeds: list[int]
+    evaluation_training_seeds: list[int]
+    evaluation_enabled: bool
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -83,6 +112,36 @@ def _integer_list(value: Any, field: str, *, non_negative: bool = False) -> list
     if non_negative and any(item < 0 for item in value):
         raise ValueError(f"{field} must contain only non-negative integers.")
     return list(value)
+
+
+def load_execution_settings(config: dict[str, Any]) -> ExecutionSettings:
+    execution = config.get("execution", {})
+    if not isinstance(execution, dict):
+        raise ValueError("execution must be an object.")
+
+    gpu_value = execution.get("gpus", [])
+    if not isinstance(gpu_value, list) or not all(isinstance(gpu, int) and gpu >= 0 for gpu in gpu_value):
+        raise ValueError("execution.gpus must be a list of non-negative integers.")
+    if len(set(gpu_value)) != len(gpu_value):
+        raise ValueError("execution.gpus must not contain duplicates.")
+
+    default_workers = len(gpu_value) or 1
+
+    def worker_count(field: str) -> int:
+        value = execution.get(field, default_workers)
+        if not isinstance(value, int) or value <= 0:
+            raise ValueError(f"execution.{field} must be a positive integer.")
+        if gpu_value and value > len(gpu_value):
+            raise ValueError(f"execution.{field} cannot exceed the number of configured GPUs.")
+        if not gpu_value and value != 1:
+            raise ValueError(f"execution.{field} must be 1 when execution.gpus is empty.")
+        return value
+
+    return ExecutionSettings(
+        gpus=tuple(gpu_value),
+        training_workers=worker_count("training_workers"),
+        evaluation_workers=worker_count("evaluation_workers"),
+    )
 
 
 def _positive_integer(config: dict[str, Any], field: str) -> int:
@@ -276,10 +335,94 @@ def format_command(command: list[str]) -> str:
     return shlex.join(command)
 
 
-def run_command(command: list[str], repo_root: Path, *, dry_run: bool) -> None:
+def command_for_gpu(command: tuple[str, ...], gpu: int | None) -> tuple[str, ...]:
+    """Return a command using one scheduler-assigned GPU."""
+    if gpu is None:
+        return command
+
+    assigned = list(command)
+    device = f"cuda:{gpu}"
+    device_indices = [index for index, value in enumerate(assigned) if value == "--device"]
+    if device_indices:
+        for index in device_indices:
+            if index + 1 >= len(assigned):
+                raise ValueError("--device is missing its value.")
+            assigned[index + 1] = device
+    else:
+        assigned.extend(("--device", device))
+    return tuple(assigned)
+
+
+def run_command(command: tuple[str, ...] | list[str], repo_root: Path, *, dry_run: bool) -> None:
     print(f"[COMMAND] {format_command(command)}", flush=True)
     if not dry_run:
         subprocess.run(command, cwd=repo_root, check=True)
+
+
+def run_job_batch(
+    jobs: list[CommandJob],
+    repo_root: Path,
+    *,
+    gpus: tuple[int, ...],
+    workers: int,
+    dry_run: bool,
+    continue_on_error: bool,
+) -> list[CommandResult]:
+    """Run independent commands with at most one active process per GPU."""
+    if not jobs:
+        return []
+
+    worker_gpus: tuple[int | None, ...] = tuple(gpus[:workers]) if gpus else (None,)
+    if dry_run:
+        results = []
+        for index, job in enumerate(jobs):
+            gpu = worker_gpus[index % len(worker_gpus)]
+            command = command_for_gpu(job.command, gpu)
+            target = f"cuda:{gpu}" if gpu is not None else "configured device"
+            print(f"[DRY-RUN JOB] {job.label} -> {target}")
+            run_command(command, repo_root, dry_run=True)
+            results.append(CommandResult(job, command, gpu, None))
+        return results
+
+    pending: queue.Queue[tuple[int, CommandJob]] = queue.Queue()
+    for index, job in enumerate(jobs):
+        pending.put((index, job))
+
+    results: list[CommandResult | None] = [None] * len(jobs)
+    stop = threading.Event()
+    print_lock = threading.Lock()
+
+    def worker(gpu: int | None) -> None:
+        while not stop.is_set():
+            try:
+                index, job = pending.get_nowait()
+            except queue.Empty:
+                return
+
+            command = command_for_gpu(job.command, gpu)
+            target = f"cuda:{gpu}" if gpu is not None else "configured device"
+            with print_lock:
+                print(f"[START] {job.label} -> {target}", flush=True)
+            error: BaseException | None = None
+            try:
+                run_command(command, repo_root, dry_run=False)
+            except (OSError, subprocess.CalledProcessError, ValueError) as caught:
+                error = caught
+                if not continue_on_error:
+                    stop.set()
+            results[index] = CommandResult(job, command, gpu, error)
+            with print_lock:
+                state = "FAILED" if error is not None else "DONE"
+                print(f"[{state}] {job.label} -> {target}", flush=True)
+            pending.task_done()
+
+    threads = [threading.Thread(target=worker, args=(gpu,), name=f"gpu-worker-{gpu}") for gpu in worker_gpus]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    return [result for result in results if result is not None]
 
 
 def select_methods(methods: list[dict[str, Any]], only: list[str]) -> list[dict[str, Any]]:
@@ -312,6 +455,88 @@ def build_analysis_command(
     return command
 
 
+def collect_evaluation_jobs(
+    repo_root: Path,
+    python_executable: str,
+    contexts: list[MethodContext],
+    generated_checkpoints: dict[tuple[str, int], str],
+    failed_training: set[tuple[str, int]],
+    *,
+    dry_run: bool,
+) -> tuple[list[CommandJob], dict[str, tuple[str, int, int, int]], int, list[str]]:
+    jobs: list[CommandJob] = []
+    metadata: dict[str, tuple[str, int, int, int]] = {}
+    skipped = 0
+    failures: list[str] = []
+
+    for context in contexts:
+        method = context.method
+        if not context.evaluation_enabled:
+            continue
+        test_delays = _integer_list(
+            context.evaluation.get("test_delays"),
+            f"{method['key']} evaluation test_delays",
+            non_negative=True,
+        )
+        evaluation_seeds = _integer_list(
+            context.evaluation.get("seeds"),
+            f"{method['key']} evaluation seeds",
+        )
+
+        for training_seed in context.evaluation_training_seeds:
+            key = (method["key"], training_seed)
+            if key in failed_training:
+                print(f"[SKIP] Evaluation for failed training: {method['key']} seed={training_seed}")
+                continue
+            checkpoint = generated_checkpoints.get(key)
+            if checkpoint is None:
+                try:
+                    checkpoint = resolve_configured_checkpoint(
+                        repo_root,
+                        method,
+                        context.training,
+                        training_seed,
+                        dry_run=dry_run,
+                    )
+                except (OSError, ValueError) as error:
+                    failure = f"checkpoint {method['key']} seed={training_seed}: {error}"
+                    failures.append(failure)
+                    print(f"[ERROR] {failure}")
+                    continue
+
+            for test_delay in test_delays:
+                for evaluation_seed in evaluation_seeds:
+                    output_path = render_output_path(
+                        repo_root,
+                        method,
+                        context.evaluation,
+                        training_seed=training_seed,
+                        evaluation_seed=evaluation_seed,
+                        test_delay=test_delay,
+                    )
+                    if output_path.exists() and not context.evaluation.get("overwrite", False):
+                        print(f"[SKIP] Result already exists: {output_path}")
+                        skipped += 1
+                        continue
+                    command = build_evaluation_command(
+                        repo_root,
+                        python_executable,
+                        method,
+                        context.training,
+                        context.evaluation,
+                        checkpoint=checkpoint,
+                        training_seed=training_seed,
+                        evaluation_seed=evaluation_seed,
+                        test_delay=test_delay,
+                        output_path=output_path,
+                    )
+                    label = f"eval:{method['key']}:train-{training_seed}:delay-{test_delay}:seed-{evaluation_seed}"
+                    jobs.append(CommandJob(label, tuple(command)))
+                    metadata[label] = (method["key"], training_seed, test_delay, evaluation_seed)
+
+    return jobs, metadata, skipped, failures
+
+
 def main() -> int:
     args = build_parser().parse_args()
     repo_root = Path(__file__).resolve().parents[1]
@@ -334,14 +559,23 @@ def main() -> int:
     common_evaluation = common.get("evaluation", {})
     python_executable = args.python or config.get("python") or sys.executable
     continue_on_error = args.continue_on_error or bool(config.get("continue_on_error", False))
+    execution = load_execution_settings(config)
     generated_checkpoints: dict[tuple[str, int], str] = {}
+    failed_training: set[tuple[str, int]] = set()
     failures: list[str] = []
     commands_run = 0
     commands_skipped = 0
 
+    gpu_pool = ", ".join(f"cuda:{gpu}" for gpu in execution.gpus) if execution.gpus else "configured devices"
     print(f"[INFO] Config: {config_path.resolve()}")
     print(f"[INFO] Methods: {', '.join(method['key'] for method in selected)}")
     print(f"[INFO] Mode: {'dry-run' if args.dry_run else 'execute'}")
+    print(f"[INFO] GPU pool: {gpu_pool}")
+    print(f"[INFO] Workers: training={execution.training_workers}, evaluation={execution.evaluation_workers}")
+
+    method_contexts: list[MethodContext] = []
+    training_jobs: list[CommandJob] = []
+    training_metadata: dict[str, tuple[dict[str, Any], int, str]] = {}
 
     for method in selected:
         train_cfg = merge_stage_config(common_train, method.get("training", {}))
@@ -349,106 +583,104 @@ def main() -> int:
         training_seeds = _integer_list(train_cfg.get("seeds"), f"{method['key']} training seeds")
         train_enabled = bool(train_cfg.get("enabled", True)) and not args.skip_train
         evaluation_enabled = bool(evaluation_cfg.get("enabled", True)) and not args.skip_eval
+        evaluation_training_seeds = _integer_list(
+            evaluation_cfg.get("training_seeds", training_seeds),
+            f"{method['key']} evaluation training_seeds",
+        )
+        method_contexts.append(
+            MethodContext(
+                method,
+                train_cfg,
+                evaluation_cfg,
+                training_seeds,
+                evaluation_training_seeds,
+                evaluation_enabled,
+            )
+        )
 
-        print(f"\n[METHOD] {method['key']} - {method.get('name', method['task'])}")
-
-        if train_enabled:
-            for training_seed in training_seeds:
-                command, run_name = build_train_command(
-                    repo_root,
-                    python_executable,
-                    method,
-                    train_cfg,
-                    training_seed,
-                )
-                try:
-                    run_command(command, repo_root, dry_run=args.dry_run)
-                    commands_run += 1
-                    if args.dry_run:
-                        generated_checkpoints[(method["key"], training_seed)] = (
-                            f"<checkpoint-generated:{method['key']}:train-seed-{training_seed}>"
-                        )
-                    else:
-                        checkpoint = find_trained_checkpoint(repo_root, method["experiment_name"], run_name)
-                        generated_checkpoints[(method["key"], training_seed)] = str(checkpoint)
-                        print(f"[CHECKPOINT] {checkpoint}")
-                except (OSError, subprocess.CalledProcessError, ValueError) as error:
-                    failure = f"training {method['key']} seed={training_seed}: {error}"
-                    failures.append(failure)
-                    print(f"[ERROR] {failure}")
-                    if not continue_on_error:
-                        raise
-
-        if not evaluation_enabled:
+        print(f"[METHOD] {method['key']} - {method.get('name', method['task'])}")
+        if not train_enabled:
             continue
-
-        test_delays = _integer_list(
-            evaluation_cfg.get("test_delays"),
-            f"{method['key']} evaluation test_delays",
-            non_negative=True,
-        )
-        evaluation_seeds = _integer_list(
-            evaluation_cfg.get("seeds"),
-            f"{method['key']} evaluation seeds",
-        )
-
         for training_seed in training_seeds:
-            checkpoint = generated_checkpoints.get((method["key"], training_seed))
-            if checkpoint is None:
-                try:
-                    checkpoint = resolve_configured_checkpoint(
-                        repo_root,
-                        method,
-                        train_cfg,
-                        training_seed,
-                        dry_run=args.dry_run,
-                    )
-                except (OSError, ValueError) as error:
-                    failure = f"checkpoint {method['key']} seed={training_seed}: {error}"
-                    failures.append(failure)
-                    print(f"[ERROR] {failure}")
-                    if not continue_on_error:
-                        raise
-                    continue
+            command, run_name = build_train_command(repo_root, python_executable, method, train_cfg, training_seed)
+            label = f"train:{method['key']}:seed-{training_seed}"
+            training_jobs.append(CommandJob(label, tuple(command)))
+            training_metadata[label] = (method, training_seed, run_name)
 
-            for test_delay in test_delays:
-                for evaluation_seed in evaluation_seeds:
-                    output_path = render_output_path(
-                        repo_root,
-                        method,
-                        evaluation_cfg,
-                        training_seed=training_seed,
-                        evaluation_seed=evaluation_seed,
-                        test_delay=test_delay,
-                    )
-                    if output_path.exists() and not evaluation_cfg.get("overwrite", False):
-                        print(f"[SKIP] Result already exists: {output_path}")
-                        commands_skipped += 1
-                        continue
-                    command = build_evaluation_command(
-                        repo_root,
-                        python_executable,
-                        method,
-                        train_cfg,
-                        evaluation_cfg,
-                        checkpoint=checkpoint,
-                        training_seed=training_seed,
-                        evaluation_seed=evaluation_seed,
-                        test_delay=test_delay,
-                        output_path=output_path,
-                    )
-                    try:
-                        run_command(command, repo_root, dry_run=args.dry_run)
-                        commands_run += 1
-                    except (OSError, subprocess.CalledProcessError) as error:
-                        failure = (
-                            f"evaluation {method['key']} train-seed={training_seed} "
-                            f"test-delay={test_delay} eval-seed={evaluation_seed}: {error}"
-                        )
-                        failures.append(failure)
-                        print(f"[ERROR] {failure}")
-                        if not continue_on_error:
-                            raise
+    if training_jobs:
+        print(f"\n[PHASE] Training jobs: {len(training_jobs)}")
+        training_results = run_job_batch(
+            training_jobs,
+            repo_root,
+            gpus=execution.gpus,
+            workers=execution.training_workers,
+            dry_run=args.dry_run,
+            continue_on_error=continue_on_error,
+        )
+        for result in training_results:
+            method, training_seed, run_name = training_metadata[result.job.label]
+            key = (method["key"], training_seed)
+            if result.error is not None:
+                failed_training.add(key)
+                failure = f"training {method['key']} seed={training_seed}: {result.error}"
+                failures.append(failure)
+                print(f"[ERROR] {failure}")
+                continue
+
+            commands_run += 1
+            if args.dry_run:
+                generated_checkpoints[key] = f"<checkpoint-generated:{method['key']}:train-seed-{training_seed}>"
+                continue
+            try:
+                checkpoint = find_trained_checkpoint(repo_root, method["experiment_name"], run_name)
+                generated_checkpoints[key] = str(checkpoint)
+                print(f"[CHECKPOINT] {checkpoint}")
+            except (OSError, ValueError) as error:
+                failed_training.add(key)
+                failure = f"checkpoint {method['key']} seed={training_seed}: {error}"
+                failures.append(failure)
+                print(f"[ERROR] {failure}")
+
+        if failures and not continue_on_error:
+            raise RuntimeError(failures[0])
+
+    evaluation_jobs, evaluation_metadata, skipped_results, evaluation_setup_failures = collect_evaluation_jobs(
+        repo_root,
+        python_executable,
+        method_contexts,
+        generated_checkpoints,
+        failed_training,
+        dry_run=args.dry_run,
+    )
+    commands_skipped += skipped_results
+    failures.extend(evaluation_setup_failures)
+    if evaluation_setup_failures and not continue_on_error:
+        raise RuntimeError(evaluation_setup_failures[0])
+
+    if evaluation_jobs:
+        print(f"\n[PHASE] Evaluation jobs: {len(evaluation_jobs)}")
+        evaluation_results = run_job_batch(
+            evaluation_jobs,
+            repo_root,
+            gpus=execution.gpus,
+            workers=execution.evaluation_workers,
+            dry_run=args.dry_run,
+            continue_on_error=continue_on_error,
+        )
+        for result in evaluation_results:
+            method_key, training_seed, test_delay, evaluation_seed = evaluation_metadata[result.job.label]
+            if result.error is None:
+                commands_run += 1
+                continue
+            failure = (
+                f"evaluation {method_key} train-seed={training_seed} "
+                f"test-delay={test_delay} eval-seed={evaluation_seed}: {result.error}"
+            )
+            failures.append(failure)
+            print(f"[ERROR] {failure}")
+
+        if failures and not continue_on_error:
+            raise RuntimeError(failures[0])
 
     analysis_cfg = config.get("analysis", {})
     if analysis_cfg.get("enabled", True) and not args.skip_analysis:

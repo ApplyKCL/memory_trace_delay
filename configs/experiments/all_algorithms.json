@@ -6,13 +6,19 @@
     "Set training.enabled=false to reuse checkpoint_glob without retraining.",
     "Set evaluation.enabled=false to train without evaluating.",
     "Add normal CLI or Hydra overrides to a stage's extra_args list.",
-    "Increase common.training.seeds to [42, 43, 44] for a multi-training-seed study."
+    "GPU workers dynamically pull independent method-by-seed jobs from one shared queue.",
+    "Seeds 43 and 44 are scheduled for methods that already have tracked seed-42 results."
   ],
   "continue_on_error": false,
+  "execution": {
+    "gpus": [0, 1, 2, 3],
+    "training_workers": 4,
+    "evaluation_workers": 4
+  },
   "common": {
     "training": {
       "enabled": true,
-      "seeds": [42],
+      "seeds": [42, 43, 44],
       "num_envs": 4096,
       "max_iterations": 300,
       "device": "cuda:0",
@@ -21,6 +27,7 @@
     },
     "evaluation": {
       "enabled": true,
+      "training_seeds": [42, 43, 44],
       "seeds": [123],
       "test_delays": [0, 2, 4, 6],
       "num_envs": 256,
@@ -39,7 +46,8 @@
       "task": "MemoryTrace-Velocity-Flat-Unitree-Go2-v0",
       "experiment_name": "memory_trace_delay_go2_flat_baseline",
       "training": {
-        "enabled": false,
+        "enabled": true,
+        "seeds": [43, 44],
         "delay_min": 0,
         "delay_max": 0,
         "run_name": "delay0_seed{training_seed}_full",
@@ -60,7 +68,8 @@
       "task": "MemoryTrace-Velocity-Flat-Unitree-Go2-v0",
       "experiment_name": "memory_trace_delay_go2_flat_baseline",
       "training": {
-        "enabled": false,
+        "enabled": true,
+        "seeds": [43, 44],
         "delay_min": 2,
         "delay_max": 2,
         "run_name": "delay2_seed{training_seed}_full",
@@ -81,7 +90,8 @@
       "task": "MemoryTrace-Velocity-Flat-Unitree-Go2-v0",
       "experiment_name": "memory_trace_delay_go2_flat_baseline",
       "training": {
-        "enabled": false,
+        "enabled": true,
+        "seeds": [43, 44],
         "delay_min": 0,
         "delay_max": 4,
         "run_name": "delay0to4_random_seed{training_seed}_full",
@@ -102,7 +112,8 @@
       "task": "MemoryTrace-Stack-Velocity-Flat-Unitree-Go2-v0",
       "experiment_name": "memory_trace_delay_go2_flat_stack",
       "training": {
-        "enabled": false,
+        "enabled": true,
+        "seeds": [43, 44],
         "delay_min": 0,
         "delay_max": 4,
         "run_name": "stack5_delay0to4_seed{training_seed}_full",

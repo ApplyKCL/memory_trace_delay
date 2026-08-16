@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import time
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,72 @@ def test_project_experiment_config_is_valid() -> None:
         "stack5",
         "trace08",
     ]
+    assert module.load_execution_settings(config) == module.ExecutionSettings((0, 1, 2, 3), 4, 4)
+    assert config["common"]["training"]["seeds"] == [42, 43, 44]
+    assert config["methods"][0]["training"]["seeds"] == [43, 44]
+
+
+def test_duplicate_gpu_is_rejected() -> None:
+    with pytest.raises(ValueError, match="duplicates"):
+        module.load_execution_settings({"execution": {"gpus": [0, 0]}})
+
+
+def test_scheduler_replaces_device_without_mutating_command() -> None:
+    command = ("python", "train.py", "--device", "cuda:0", "--headless")
+    assigned = module.command_for_gpu(command, 3)
+    assert command[3] == "cuda:0"
+    assert assigned[3] == "cuda:3"
+
+
+def test_dry_run_assigns_jobs_round_robin_to_worker_gpus(tmp_path: Path) -> None:
+    jobs = [
+        module.CommandJob(f"train:trace08:seed-{seed}", ("python", "train.py", "--device", "cuda:0"))
+        for seed in (42, 43, 44)
+    ]
+    results = module.run_job_batch(
+        jobs,
+        tmp_path,
+        gpus=(0, 1, 2, 3),
+        workers=2,
+        dry_run=True,
+        continue_on_error=False,
+    )
+    assert [result.gpu for result in results] == [0, 1, 0]
+    assert [result.command[-1] for result in results] == ["cuda:0", "cuda:1", "cuda:0"]
+
+
+def test_parallel_workers_keep_one_active_job_per_gpu(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    active_gpus: set[str] = set()
+    seen_gpus: set[str] = set()
+    overlapping_gpus: set[str] = set()
+    lock = module.threading.Lock()
+
+    def fake_run(command: tuple[str, ...], _repo_root: Path, *, dry_run: bool) -> None:
+        assert not dry_run
+        device = command[command.index("--device") + 1]
+        with lock:
+            if device in active_gpus:
+                overlapping_gpus.add(device)
+            active_gpus.add(device)
+            seen_gpus.add(device)
+        time.sleep(0.01)
+        with lock:
+            active_gpus.remove(device)
+
+    monkeypatch.setattr(module, "run_command", fake_run)
+    jobs = [module.CommandJob(f"job-{index}", ("python", "train.py", "--device", "cuda:0")) for index in range(8)]
+    results = module.run_job_batch(
+        jobs,
+        tmp_path,
+        gpus=(0, 1, 2, 3),
+        workers=4,
+        dry_run=False,
+        continue_on_error=False,
+    )
+
+    assert len(results) == 8
+    assert seen_gpus == {"cuda:0", "cuda:1", "cuda:2", "cuda:3"}
+    assert not overlapping_gpus
 
 
 def test_merge_concatenates_common_and_method_extra_args() -> None:
@@ -68,8 +135,7 @@ def test_output_filename_keeps_training_and_evaluation_seeds(tmp_path: Path) -> 
     evaluation_cfg = {
         "output_dir": "results/trace",
         "result_filename": (
-            "trace08_train0to4_trainseed{training_seed}_test{test_delay}_"
-            "evalseed{evaluation_seed}.json"
+            "trace08_train0to4_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json"
         ),
     }
     output = module.render_output_path(

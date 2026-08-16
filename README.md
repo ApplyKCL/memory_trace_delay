@@ -219,7 +219,7 @@ The complete experiment suite is described by:
 configs/experiments/all_algorithms.json
 ```
 
-The runner executes enabled training jobs sequentially, finds newly generated or existing checkpoints, runs every configured test delay/evaluation seed, and finally regenerates the CSV and figures.
+The runner expands each enabled method and training seed into an independent job. GPU workers pull jobs from a shared queue, so a completed GPU immediately starts the next waiting job. After all training jobs finish, evaluation jobs use the same GPU pool; analysis runs once after evaluation.
 
 Always inspect the generated commands first:
 
@@ -238,8 +238,10 @@ python scripts/run_experiments.py \
 
 The current JSON defaults reflect repository progress:
 
-- `train0`, `train2`, `train0to4`, and `stack5`: training disabled, evaluation enabled, reuse existing checkpoints;
-- `trace08`: training and evaluation enabled;
+- GPU pool `cuda:0` through `cuda:3`, with four training and four evaluation workers;
+- `train0`, `train2`, `train0to4`, and `stack5`: train missing seeds 43 and 44 while retaining existing seed-42 results;
+- `trace08`: train seeds 42, 43, and 44;
+- evaluation covers trained-model seeds 42, 43, and 44 at every configured test delay;
 - analysis enabled after all selected jobs.
 
 Useful command-line selections:
@@ -288,13 +290,24 @@ Every method supports independent stage control:
 - `analysis.enabled=false` disables final CSV/plot generation;
 - `extra_args` accepts additional normal CLI flags or Hydra overrides.
 
-For example, a method may override the common GPU, environment count, logger, or Hydra configuration:
+The global GPU pool and concurrency limits are configured separately:
+
+```json
+"execution": {
+  "gpus": [0, 1, 2, 3],
+  "training_workers": 4,
+  "evaluation_workers": 4
+}
+```
+
+Each active worker runs one child process on its assigned GPU. Set both worker counts to `1` to keep one job active at a time. Set `gpus` to an empty list for the original behavior in which each stage uses its own `device` value.
+
+For example, a method may override the common environment count, logger, or Hydra configuration:
 
 ```json
 "training": {
   "enabled": true,
   "num_envs": 2048,
-  "device": "cuda:1",
   "extra_args": [
     "--logger",
     "tensorboard",
@@ -314,9 +327,12 @@ Change the common training and evaluation seed lists in the JSON configuration:
   "seeds": [42, 43, 44]
 },
 "evaluation": {
+  "training_seeds": [42, 43, 44],
   "seeds": [123]
 }
 ```
+
+`training.seeds` selects models that will be trained by this run. `evaluation.training_seeds` selects trained models to evaluate, while `evaluation.seeds` controls evaluation randomness. This separation allows the current configuration to train only missing seeds 43 and 44 for methods that already have a seed-42 checkpoint.
 
 New result filenames contain both seeds to avoid overwriting independent models:
 
