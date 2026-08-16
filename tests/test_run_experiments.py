@@ -31,18 +31,32 @@ def test_project_experiment_config_is_valid() -> None:
         "train0",
         "train2",
         "train0to4",
+        "stack5_train0",
+        "stack5_train2",
         "stack5",
+        "trace08_train0",
+        "trace08_train2",
         "trace08",
     ]
 
-    assert module.load_execution_settings(config) == module.ExecutionSettings(
-        (0, 1, 2, 3), 4, 4
-    )
+    assert module.load_execution_settings(config) == module.ExecutionSettings((0, 1, 2, 3), 4, 4)
 
     assert config["common"]["training"]["seeds"] == [42, 43, 44]
     assert config["common"]["training"]["max_iterations"] == 500
     assert config["common"]["evaluation"]["training_seeds"] == [42, 43, 44]
     assert config["common"]["evaluation"]["test_delays"] == [0, 2, 4, 6]
+
+    methods = {method["key"]: method for method in config["methods"]}
+    expected_fixed_delays = {
+        "stack5_train0": (0, 0),
+        "stack5_train2": (2, 2),
+        "trace08_train0": (0, 0),
+        "trace08_train2": (2, 2),
+    }
+    for key, delay_range in expected_fixed_delays.items():
+        training = methods[key]["training"]
+        assert (training["delay_min"], training["delay_max"]) == delay_range
+        assert training["seeds"] == [42, 43, 44]
 
 
 def test_duplicate_gpu_is_rejected() -> None:

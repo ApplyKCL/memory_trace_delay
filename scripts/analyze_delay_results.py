@@ -14,7 +14,11 @@ METHOD_LABELS = {
     "train0": "Fixed delay 0 MLP",
     "train2": "Fixed delay 2 MLP",
     "train0to4": "Random delay 0-4 MLP",
+    "stack5_train0": "Fixed delay 0 Stack-5",
+    "stack5_train2": "Fixed delay 2 Stack-5",
     "stack5": "Random delay 0-4 Stack-5",
+    "trace08_train0": "Fixed delay 0 Trace (decay 0.8)",
+    "trace08_train2": "Fixed delay 2 Trace (decay 0.8)",
     "trace08": "Random delay 0-4 Trace (decay 0.8)",
 }
 
@@ -42,24 +46,28 @@ def parse_mlp_filename(path: Path) -> tuple[str, int, int, int | None]:
 
 def parse_stack_filename(path: Path) -> tuple[str, int, int, int | None]:
     match = re.match(
-        r"^stack5_train0to4(?:_trainseed(\d+))?_test(\d+)_(?:seed|evalseed)(\d+)\.json$",
+        r"^(stack5_train0to4|stack5_train0|stack5_train2)"
+        r"(?:_trainseed(\d+))?_test(\d+)_(?:seed|evalseed)(\d+)\.json$",
         path.name,
     )
     if match is None:
         raise ValueError(f"Unexpected Stack filename: {path.name}")
-    training_seed = int(match.group(1)) if match.group(1) is not None else None
-    return "stack5", int(match.group(2)), int(match.group(3)), training_seed
+    method_key = "stack5" if match.group(1) == "stack5_train0to4" else match.group(1)
+    training_seed = int(match.group(2)) if match.group(2) is not None else None
+    return method_key, int(match.group(3)), int(match.group(4)), training_seed
 
 
 def parse_trace_filename(path: Path) -> tuple[str, int, int, int | None]:
     match = re.match(
-        r"^(?:trace|trace08)_train0to4(?:_trainseed(\d+))?_test(\d+)_(?:seed|evalseed)(\d+)\.json$",
+        r"^((?:trace|trace08)_train0to4|trace08_train0|trace08_train2)"
+        r"(?:_trainseed(\d+))?_test(\d+)_(?:seed|evalseed)(\d+)\.json$",
         path.name,
     )
     if match is None:
         raise ValueError(f"Unexpected Trace filename: {path.name}")
-    training_seed = int(match.group(1)) if match.group(1) is not None else None
-    return "trace08", int(match.group(2)), int(match.group(3)), training_seed
+    method_key = "trace08" if match.group(1).endswith("_train0to4") else match.group(1)
+    training_seed = int(match.group(2)) if match.group(2) is not None else None
+    return method_key, int(match.group(3)), int(match.group(4)), training_seed
 
 
 def read_json(path: Path) -> dict:
@@ -90,13 +98,9 @@ def make_row(
     evaluation_seed = int(result.get("evaluation_seed", result.get("seed", filename_eval_seed)))
 
     if test_delay != filename_test_delay:
-        raise ValueError(
-            f"Filename test delay {filename_test_delay} disagrees with JSON test delay {test_delay}."
-        )
+        raise ValueError(f"Filename test delay {filename_test_delay} disagrees with JSON test delay {test_delay}.")
     if evaluation_seed != filename_eval_seed:
-        raise ValueError(
-            f"Filename evaluation seed {filename_eval_seed} disagrees with JSON seed {evaluation_seed}."
-        )
+        raise ValueError(f"Filename evaluation seed {filename_eval_seed} disagrees with JSON seed {evaluation_seed}.")
 
     training_seed = infer_training_seed(result)
     if filename_training_seed is not None and training_seed != filename_training_seed:
@@ -196,7 +200,7 @@ def plot_metric(rows: list[dict], metric: str, ylabel: str, output_path: Path) -
     import matplotlib.pyplot as plt
 
     aggregated = aggregate_metric(rows, metric)
-    plt.figure(figsize=(8, 5.5))
+    plt.figure(figsize=(10, 6.5))
 
     for method_key, label in METHOD_LABELS.items():
         points = [point for point in aggregated if point["method_key"] == method_key]
@@ -217,7 +221,7 @@ def plot_metric(rows: list[dict], metric: str, ylabel: str, output_path: Path) -
     plt.ylabel(ylabel)
     plt.xticks(delays)
     plt.grid(True, alpha=0.3)
-    plt.legend()
+    plt.legend(ncol=2, fontsize=8)
     plt.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_path, dpi=200)
@@ -240,9 +244,7 @@ def print_comparison(rows: list[dict]) -> None:
         print(f"\n{label}")
         for return_row in method_returns:
             delay = return_row["test_delay"]
-            xy_row = next(
-                row for row in xy_rows if row["method_key"] == method_key and row["test_delay"] == delay
-            )
+            xy_row = next(row for row in xy_rows if row["method_key"] == method_key and row["test_delay"] == delay)
             failure_row = next(
                 row for row in failure_rows if row["method_key"] == method_key and row["test_delay"] == delay
             )

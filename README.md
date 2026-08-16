@@ -34,7 +34,11 @@ The history is zero-filled after reset. For `d=0`, the buffer returns the action
 | `train0` | Current observation `o_t` | Fixed `d=0` |
 | `train2` | Current observation `o_t` | Fixed `d=2` |
 | `train0to4` | Current observation `o_t` | Episode-fixed random `d in [0,4]` |
+| `stack5_train0` | Five flattened policy observations | Fixed `d=0` |
+| `stack5_train2` | Five flattened policy observations | Fixed `d=2` |
 | `stack5` | Five flattened policy observations | Episode-fixed random `d in [0,4]` |
+| `trace08_train0` | Current observation plus exponential trace `[o_t, z_t]` | Fixed `d=0` |
+| `trace08_train2` | Current observation plus exponential trace `[o_t, z_t]` | Fixed `d=2` |
 | `trace08` | Current observation plus exponential trace `[o_t, z_t]` | Episode-fixed random `d in [0,4]` |
 
 The Trace-PPO state is
@@ -97,13 +101,14 @@ Status below describes files currently tracked in this repository. A checkpoint 
 | Isaac Lab action-delay integration | Complete | Raw action is delayed before `ActionManager.process_action()` |
 | Fixed-delay MLP experiments | Complete for one training seed | `train0` and `train2`, evaluated at four test delays |
 | Random-delay MLP experiment | Complete for one training seed | `train0to4`, evaluated at four test delays |
-| Stack-5 experiment | Complete for one training seed | Four tracked evaluation JSON files |
+| Random-delay Stack-5 experiment | Complete for one training seed | Four tracked evaluation JSON files |
+| Fixed-delay Stack-5 experiments | Configured; results missing | `stack5_train0` and `stack5_train2` are in the experiment matrix |
 | Trace implementation and task registration | Complete in code | Buffer, RSL-RL wrapper, task config, debug script, and tests |
-| Trace training/evaluation results | **Missing from repository** | No `results/trace/` directory or Trace result JSON is present |
+| Trace training/evaluation results | **Missing from repository** | Fixed `d=0`, fixed `d=2`, and random `d=0-4` variants are configured |
 | Multiple training seeds | **Not complete** | Tracked models use training seed 42 only |
 | Combined MLP/Stack/Trace figures | **Pending Trace results** | Current figures compare MLP and Stack only |
 
-For the current single-training-seed snapshot, 16 of the 20 planned method-by-delay result cells are present. The four missing cells are the Trace-PPO evaluations.
+The expanded study contains 36 method-by-test-delay cells: nine training conditions evaluated at four delays. The tracked snapshot currently contains the original 16 MLP/Stack-random cells; the two fixed-delay Stack conditions and all three Trace conditions still need results.
 
 ## Preliminary tracked results
 
@@ -116,7 +121,7 @@ The table reports mean episode return from `results/combined_summary.csv`. These
 | 4 | 13.14 | 26.92 | 14.73 | 29.33 | Stack-5 |
 | 6 | 9.28 | 16.37 | 10.52 | 26.75 | Stack-5 |
 
-The current data suggest that Stack-5 is more robust at the larger unseen delays, but the central research question cannot be answered until Trace-PPO and multiple training seeds are evaluated.
+The current data suggest that random-delay Stack-5 is more robust at the larger unseen delays, but the expanded controlled comparison cannot be answered until the fixed-delay Stack variants, all Trace variants, and multiple training seeds are evaluated.
 
 Existing artifacts are stored under:
 
@@ -239,28 +244,36 @@ python scripts/run_experiments.py \
 The current JSON defaults reflect repository progress:
 
 - GPU pool `cuda:0` through `cuda:3`, with four training and four evaluation workers;
-- `train0`, `train2`, `train0to4`, and `stack5`: train missing seeds 43 and 44 while retaining existing seed-42 results;
-- `trace08`: train seeds 42, 43, and 44;
+- nine conditions: MLP, Stack-5, and Trace-PPO each trained at fixed `d=0`, fixed `d=2`, and random `d=0-4`;
+- every condition is trained from scratch with seeds 42, 43, and 44 for 500 iterations;
 - evaluation covers trained-model seeds 42, 43, and 44 at every configured test delay;
 - analysis enabled after all selected jobs.
+
+The full configuration creates 27 training jobs and 108 evaluation jobs. Four jobs run concurrently; a free GPU automatically receives the next queued job.
 
 Useful command-line selections:
 
 ```bash
 # Train/evaluate only Trace-PPO, then update the combined analysis.
-python scripts/run_experiments.py --only trace08
+python scripts/run_experiments.py --config configs/experiments/all_algorithms.json --only trace08
 
 # Evaluate an existing Trace checkpoint without retraining.
-python scripts/run_experiments.py --only trace08 --skip-train
+python scripts/run_experiments.py --config configs/experiments/all_algorithms.json --only trace08 --skip-train
 
 # Train Trace without evaluation or analysis.
-python scripts/run_experiments.py --only trace08 --skip-eval --skip-analysis
+python scripts/run_experiments.py --config configs/experiments/all_algorithms.json --only trace08 --skip-eval --skip-analysis
 
 # Select two methods. Repeat --only for additional methods.
-python scripts/run_experiments.py --only stack5 --only trace08
+python scripts/run_experiments.py --config configs/experiments/all_algorithms.json --only stack5 --only trace08
+
+# Run the three Stack-PPO training-delay conditions.
+python scripts/run_experiments.py --config configs/experiments/all_algorithms.json --only stack5_train0 --only stack5_train2 --only stack5
+
+# Run the three Trace-PPO training-delay conditions.
+python scripts/run_experiments.py --config configs/experiments/all_algorithms.json --only trace08_train0 --only trace08_train2 --only trace08
 
 # List configured method keys.
-python scripts/run_experiments.py --list-methods
+python scripts/run_experiments.py --config configs/experiments/all_algorithms.json --list-methods
 ```
 
 ### Configuration switches
@@ -332,7 +345,7 @@ Change the common training and evaluation seed lists in the JSON configuration:
 }
 ```
 
-`training.seeds` selects models that will be trained by this run. `evaluation.training_seeds` selects trained models to evaluate, while `evaluation.seeds` controls evaluation randomness. This separation allows the current configuration to train only missing seeds 43 and 44 for methods that already have a seed-42 checkpoint.
+`training.seeds` selects models that will be trained by this run. `evaluation.training_seeds` selects trained models to evaluate, while `evaluation.seeds` controls evaluation randomness. The lists are separate so an existing checkpoint can be evaluated without scheduling another training run.
 
 New result filenames contain both seeds to avoid overwriting independent models:
 
@@ -388,10 +401,10 @@ memory_trace_delay/
 The minimum work required to answer the research question is:
 
 1. Run `debug_memory_trace.py` on the Ubuntu Isaac Lab installation and retain the PASS output in experiment notes.
-2. Train `trace08` with the same random delay range `0-4`, seed 42, environment count, and iteration budget as Stack-5.
-3. Evaluate Trace-PPO at delays `0,2,4,6` for 1,024 episodes and add the four JSON files under `results/trace/`.
-4. Regenerate `combined_summary.csv` and all-method figures.
-5. Repeat the controlled comparison for at least three training seeds, preferably the same seed set for every method, and report mean plus standard deviation across trained models.
+2. Train all nine MLP/Stack/Trace conditions with seeds 42, 43, and 44 using the same environment count and iteration budget.
+3. Evaluate every trained model at delays `0,2,4,6` for 1,024 episodes.
+4. Regenerate `combined_summary.csv` and the nine-method figures.
+5. Report mean and standard deviation across the three independently trained models for every condition.
 
 Recommended engineering cleanup before a public/final release:
 

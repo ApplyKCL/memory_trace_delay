@@ -37,10 +37,38 @@ def test_make_row_rejects_filename_metadata_disagreement() -> None:
 
 
 def test_new_multi_seed_filename_is_parsed() -> None:
-    parsed = module.parse_trace_filename(
-        Path("trace08_train0to4_trainseed43_test6_evalseed124.json")
-    )
+    parsed = module.parse_trace_filename(Path("trace08_train0to4_trainseed43_test6_evalseed124.json"))
     assert parsed == ("trace08", 6, 124, 43)
+
+
+def test_fixed_delay_stack_filenames_are_parsed() -> None:
+    assert module.parse_stack_filename(Path("stack5_train0_trainseed42_test2_evalseed123.json")) == (
+        "stack5_train0",
+        2,
+        123,
+        42,
+    )
+    assert module.parse_stack_filename(Path("stack5_train2_trainseed44_test6_evalseed123.json")) == (
+        "stack5_train2",
+        6,
+        123,
+        44,
+    )
+
+
+def test_fixed_delay_trace_filenames_are_parsed() -> None:
+    assert module.parse_trace_filename(Path("trace08_train0_trainseed42_test2_evalseed123.json")) == (
+        "trace08_train0",
+        2,
+        123,
+        42,
+    )
+    assert module.parse_trace_filename(Path("trace08_train2_trainseed44_test6_evalseed123.json")) == (
+        "trace08_train2",
+        6,
+        123,
+        44,
+    )
 
 
 def test_legacy_filename_remains_supported() -> None:

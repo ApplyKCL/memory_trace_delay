@@ -106,6 +106,50 @@
       }
     },
     {
+      "key": "stack5_train0",
+      "name": "Stack-PPO with five observations trained at fixed delay 0",
+      "enabled": true,
+      "task": "MemoryTrace-Stack-Velocity-Flat-Unitree-Go2-v0",
+      "experiment_name": "memory_trace_delay_go2_flat_stack",
+      "training": {
+        "enabled": true,
+        "seeds": [42, 43, 44],
+        "delay_min": 0,
+        "delay_max": 0,
+        "run_name": "stack5_delay0_seed{training_seed}_full",
+        "checkpoint_glob": "logs/rsl_rl/memory_trace_delay_go2_flat_stack/*_stack5_delay0_seed{training_seed}_full/model_*.pt",
+        "extra_args": []
+      },
+      "evaluation": {
+        "enabled": true,
+        "output_dir": "results/stack",
+        "result_filename": "stack5_train0_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
+        "extra_args": []
+      }
+    },
+    {
+      "key": "stack5_train2",
+      "name": "Stack-PPO with five observations trained at fixed delay 2",
+      "enabled": true,
+      "task": "MemoryTrace-Stack-Velocity-Flat-Unitree-Go2-v0",
+      "experiment_name": "memory_trace_delay_go2_flat_stack",
+      "training": {
+        "enabled": true,
+        "seeds": [42, 43, 44],
+        "delay_min": 2,
+        "delay_max": 2,
+        "run_name": "stack5_delay2_seed{training_seed}_full",
+        "checkpoint_glob": "logs/rsl_rl/memory_trace_delay_go2_flat_stack/*_stack5_delay2_seed{training_seed}_full/model_*.pt",
+        "extra_args": []
+      },
+      "evaluation": {
+        "enabled": true,
+        "output_dir": "results/stack",
+        "result_filename": "stack5_train2_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
+        "extra_args": []
+      }
+    },
+    {
       "key": "stack5",
       "name": "Stack-PPO with five observations",
       "enabled": true,
@@ -124,6 +168,50 @@
         "enabled": true,
         "output_dir": "results/stack",
         "result_filename": "stack5_train0to4_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
+        "extra_args": []
+      }
+    },
+    {
+      "key": "trace08_train0",
+      "name": "Trace-PPO with decay 0.8 trained at fixed delay 0",
+      "enabled": true,
+      "task": "MemoryTrace-Trace-Velocity-Flat-Unitree-Go2-v0",
+      "experiment_name": "memory_trace_delay_go2_flat_trace",
+      "training": {
+        "enabled": true,
+        "seeds": [42, 43, 44],
+        "delay_min": 0,
+        "delay_max": 0,
+        "run_name": "trace08_delay0_seed{training_seed}_full",
+        "checkpoint_glob": "logs/rsl_rl/memory_trace_delay_go2_flat_trace/*_trace08_delay0_seed{training_seed}_full/model_*.pt",
+        "extra_args": []
+      },
+      "evaluation": {
+        "enabled": true,
+        "output_dir": "results/trace",
+        "result_filename": "trace08_train0_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
+        "extra_args": []
+      }
+    },
+    {
+      "key": "trace08_train2",
+      "name": "Trace-PPO with decay 0.8 trained at fixed delay 2",
+      "enabled": true,
+      "task": "MemoryTrace-Trace-Velocity-Flat-Unitree-Go2-v0",
+      "experiment_name": "memory_trace_delay_go2_flat_trace",
+      "training": {
+        "enabled": true,
+        "seeds": [42, 43, 44],
+        "delay_min": 2,
+        "delay_max": 2,
+        "run_name": "trace08_delay2_seed{training_seed}_full",
+        "checkpoint_glob": "logs/rsl_rl/memory_trace_delay_go2_flat_trace/*_trace08_delay2_seed{training_seed}_full/model_*.pt",
+        "extra_args": []
+      },
+      "evaluation": {
+        "enabled": true,
+        "output_dir": "results/trace",
+        "result_filename": "trace08_train2_trainseed{training_seed}_test{test_delay}_evalseed{evaluation_seed}.json",
         "extra_args": []
       }
     },
