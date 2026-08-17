@@ -1,0 +1,61 @@
+{
+  "task": "MemoryTrace-Trace-Velocity-Flat-Unitree-Go2-v0",
+  "checkpoint": "/home/c160/shaonanhu/graduatestudy/csci6521project/memory_trace_delay/logs/rsl_rl/memory_trace_delay_go2_flat_trace/2026-08-17_00-05-53_trace08_delay2_seed44_full/best_model.pt",
+  "selected_by_validation": true,
+  "checkpoint_selection": {
+    "method_key": "trace08_train2",
+    "training_seed": 44,
+    "checkpoint": "/home/c160/shaonanhu/graduatestudy/csci6521project/memory_trace_delay/logs/rsl_rl/memory_trace_delay_go2_flat_trace/2026-08-17_00-05-53_trace08_delay2_seed44_full/model_400.pt",
+    "iteration": 400,
+    "delay_auc": 27.84701537481366,
+    "worst_return": 7.6620947740047995,
+    "mean_failure_rate": 0.099609375,
+    "validation_seeds": [
+      901,
+      902
+    ],
+    "test_delays": [
+      0,
+      2,
+      4,
+      6
+    ],
+    "num_envs": 256,
+    "num_episodes": 256,
+    "selection_rule": "max delay_auc, max worst_return, min failure, latest iteration",
+    "validation_wall_time_seconds": 287.5116850880004,
+    "became_best": true,
+    "source_checkpoint": "/home/c160/shaonanhu/graduatestudy/csci6521project/memory_trace_delay/logs/rsl_rl/memory_trace_delay_go2_flat_trace/2026-08-17_00-05-53_trace08_delay2_seed44_full/model_400.pt",
+    "best_model": "/home/c160/shaonanhu/graduatestudy/csci6521project/memory_trace_delay/logs/rsl_rl/memory_trace_delay_go2_flat_trace/2026-08-17_00-05-53_trace08_delay2_seed44_full/best_model.pt"
+  },
+  "method": "trace08_train2",
+  "seed": 123,
+  "training_seed": 44,
+  "evaluation_seed": 123,
+  "train_delay_min": 2,
+  "train_delay_max": 2,
+  "trace_enabled": true,
+  "trace_decay": 0.8,
+  "policy_history_length": null,
+  "num_envs": 256,
+  "paired_num_envs_total": 256,
+  "paired_delay_grid": [
+    1
+  ],
+  "num_episodes": 1024,
+  "test_delay_steps": 1,
+  "step_dt_seconds": 0.02,
+  "test_delay_seconds": 0.02,
+  "tracking_error_sample_phase": "pre_action",
+  "mean_return": 35.29474378973828,
+  "std_return": 7.104471835765421,
+  "mean_episode_length": 981.1982421875,
+  "std_episode_length": 112.76665774275921,
+  "mean_pre_action_xy_velocity_error": 0.11943267172682681,
+  "std_pre_action_xy_velocity_error": 0.09068370192949501,
+  "mean_pre_action_yaw_velocity_error": 0.1473126396558655,
+  "std_pre_action_yaw_velocity_error": 0.13930683190014714,
+  "failure_rate": 0.0302734375,
+  "timeout_rate": 0.9697265625,
+  "vector_steps": 4000
+}
